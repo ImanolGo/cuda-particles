@@ -5,6 +5,8 @@ programs that build up the fundamentals, ending in an interactive GPU particle
 system you stir with the mouse: hundreds of thousands of particles, colour from
 velocity, trails, swirling.
 
+![The CUDA particle system running](docs/demo.webp)
+
 ```
    examples/01  hello, GPU              →  kernels, threads, blocks
    examples/02  vector add              →  device memory, copying, errors
