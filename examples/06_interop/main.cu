@@ -108,7 +108,9 @@ __global__ void animate_triangle(float4* __restrict__ pos,
                      : make_uchar4(255, 225, 110, 255);
 }
 
-int main() {
+int main(int argc, char** argv) {
+  (void)argc;  // only argv[0] is used, for the interop hint below
+
   // ---------------------------------------------------------------------------
   //  1. A window. We ask GLFW for X11/XWayland: GLX is the well-trodden path
   //     for CUDA/GL interop on Linux. Set CUDA_PARTICLES_PLATFORM=wayland to
@@ -147,14 +149,28 @@ int main() {
 
   // ---------------------------------------------------------------------------
   //  2. Ask CUDA which GPU is driving this OpenGL context.
+  //     On a hybrid-graphics laptop the answer is often "none", because the
+  //     window landed on the integrated GPU — see the hint below.
   // ---------------------------------------------------------------------------
   unsigned int device_count = 0;
   int devices[8];
-  CUDA_CHECK(cudaGLGetDevices(&device_count, devices, 8, cudaGLDeviceListAll));
-  if (device_count == 0) {
-    std::fprintf(stderr, "no CUDA device is associated with this GL context\n");
+  const cudaError_t pairing =
+      cudaGLGetDevices(&device_count, devices, 8, cudaGLDeviceListAll);
+  if (pairing != cudaSuccess || device_count == 0) {
+    std::fprintf(stderr,
+                 "\nCannot pair CUDA with this OpenGL context (%s).\n"
+                 "\n"
+                 "On a laptop with hybrid graphics the OpenGL context is often\n"
+                 "created on the integrated GPU, where CUDA/OpenGL interop is\n"
+                 "impossible. Move it to the NVIDIA GPU and try again:\n"
+                 "\n"
+                 "    prime-run %s\n"
+                 "    # or: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia %s\n"
+                 "\n",
+                 cudaGetErrorString(pairing), argv[0], argv[0]);
     return EXIT_FAILURE;
   }
+  std::printf("paired CUDA device: %d\n", devices[0]);
   CUDA_CHECK(cudaSetDevice(devices[0]));
 
   // ---------------------------------------------------------------------------

@@ -67,9 +67,15 @@ particles: $(BUILD)/particles
 # -----------------------------------------------------------------------------
 #  Run / inspect / clean
 # -----------------------------------------------------------------------------
+#  On hybrid-graphics laptops (Optimus) the OpenGL context is created on the
+#  integrated GPU by default, and CUDA/OpenGL interop is impossible there.
+#  `prime-run` (from nvidia-prime) moves the context to the NVIDIA GPU, so we
+#  use it automatically when it is installed. Disable with `make run-X RUN=`.
+RUN ?= $(shell command -v prime-run 2>/dev/null)
+
 run-%: $(BUILD)/%
-	@echo "▶ $(BUILD)/$*"
-	@./$(BUILD)/$*
+	@echo "▶ $(if $(RUN),$(RUN) ,)$(BUILD)/$*"
+	@$(RUN) ./$(BUILD)/$*
 
 doctor:
 	@echo "nvcc        : $(NVCC)"

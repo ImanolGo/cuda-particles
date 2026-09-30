@@ -162,10 +162,24 @@ back to `/opt/cuda/bin/nvcc`, so `make doctor` should still find it.
 **`unsupported GNU version! gcc 16 is not supported`** — `make UNSUPPORTED=1`.
 See `docs/00_setup.md` for the details and for using an older host compiler.
 
-**Blank window / interop error `cudaErrorInvalidHostPointer` or similar** — the
-particle examples default to an **X11 (XWayland) GL context**, because GLX is
-the well-supported path for CUDA/OpenGL interop on Linux. To try a native
-Wayland (EGL) context instead:
+**Windowed examples fail with "Cannot pair CUDA with this OpenGL context"** —
+you are on a laptop with hybrid graphics (Optimus): the window was created on
+the integrated GPU, so CUDA and OpenGL are on different devices and cannot
+share buffers. Move the GL context to the NVIDIA GPU:
+
+```bash
+prime-run make run-particles
+# or, equivalently:
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia make run-particles
+```
+
+`make run-X` already does this for you when `prime-run` (package
+`nvidia-prime`) is installed. Override with `make run-particles RUN=`.
+
+**Blank window (and the GPU check above passed)** — the particle examples
+default to an **X11 (XWayland) GL context**, because GLX is the well-supported
+path for CUDA/OpenGL interop on Linux. To try a native Wayland (EGL) context
+instead:
 
 ```bash
 CUDA_PARTICLES_PLATFORM=wayland make run-particles

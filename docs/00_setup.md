@@ -146,3 +146,18 @@ interop reliability; see the *Troubleshooting* section of the main README.
 **Everything compiles but output is zeros** — you forgot to copy the result
 back, or your kernel silently failed. Wrap the call in `CUDA_CHECK(...)` from
 `common/cuda_check.h` and add `CUDA_CHECK_KERNEL()` after the launch.
+
+**`Cannot pair CUDA with this OpenGL context` (examples 06 and particles)** —
+you have hybrid graphics (a laptop with both an Intel/AMD iGPU and an NVIDIA
+GPU). The window is created on the integrated GPU, but CUDA lives on the NVIDIA
+one, and the two cannot share buffers. Force the GL context onto NVIDIA:
+
+```bash
+prime-run make run-particles
+# equivalent, without the helper script:
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia make run-particles
+```
+
+Check it worked: the program prints `GL renderer` — it must say *NVIDIA*
+before CUDA interop can succeed. `make run-X` applies `prime-run` automatically
+when it is installed (`nvidia-prime`); disable with `make run-X RUN=`.

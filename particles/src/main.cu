@@ -283,13 +283,24 @@ int main(int argc, char** argv) {
   // ---------------------------------------------------------------------------
   //  2. Which GPU is drawing this window? Use that one for CUDA.
   //     (On a multi-GPU laptop this is the difference between working and
-  //     not working at all.)
+  //     not working at all — see the hint printed on failure.)
   // ---------------------------------------------------------------------------
   unsigned int device_count = 0;
   int devices[8];
-  CUDA_CHECK(cudaGLGetDevices(&device_count, devices, 8, cudaGLDeviceListAll));
-  if (device_count == 0) {
-    std::fprintf(stderr, "no CUDA device is associated with this GL context\n");
+  const cudaError_t pairing =
+      cudaGLGetDevices(&device_count, devices, 8, cudaGLDeviceListAll);
+  if (pairing != cudaSuccess || device_count == 0) {
+    std::fprintf(stderr,
+                 "\nCannot pair CUDA with this OpenGL context (%s).\n"
+                 "\n"
+                 "On a laptop with hybrid graphics the OpenGL context is often\n"
+                 "created on the integrated GPU, where CUDA/OpenGL interop is\n"
+                 "impossible. Move it to the NVIDIA GPU and try again:\n"
+                 "\n"
+                 "    prime-run %s\n"
+                 "    # or: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia %s\n"
+                 "\n",
+                 cudaGetErrorString(pairing), argv[0], argv[0]);
     return EXIT_FAILURE;
   }
   CUDA_CHECK(cudaSetDevice(devices[0]));

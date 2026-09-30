@@ -172,7 +172,7 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   //  share a colour and you see coherent ribbons), brightness follows speed.
   // ---------------------------------------------------------------------------
   const float speed = sqrtf(V.x * V.x + V.y * V.y);
-  const float hue = __atan2f(V.y, V.x) * kInvTau + 0.5f;
+  const float hue = atan2f(V.y, V.x) * kInvTau + 0.5f;
   float3 c = palette(hue);
   const float bright = fminf(1.0f, 0.18f + speed * 0.55f);
   c.x *= bright;
