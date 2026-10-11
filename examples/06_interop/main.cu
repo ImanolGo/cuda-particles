@@ -119,7 +119,8 @@ int main(int argc, char** argv) {
   const char* forced = std::getenv("CUDA_PARTICLES_PLATFORM");
   const bool want_wayland = forced && std::strcmp(forced, "wayland") == 0;
   glfwInitHint(GLFW_PLATFORM,
-               want_wayland ? GLFW_PLATFORM_WAYLAND : GLFW_PLATFORM_X11);
+               want_wayland ? GLFW_PLATFORM_WAYLAND :
+               (forced && std::strcmp(forced, "any") == 0 ? GLFW_ANY_PLATFORM : GLFW_PLATFORM_X11));
   if (!glfwInit()) {
     glfwTerminate();
     glfwInitHint(GLFW_PLATFORM, GLFW_ANY_PLATFORM);
@@ -198,10 +199,12 @@ int main(int argc, char** argv) {
   glBindVertexArray(0);
 
   cudaGraphicsResource *res_pos = nullptr, *res_col = nullptr;
+  // Both buffers are fully rewritten every frame. WriteDiscard is appropriate
+  // here, unlike the final project's persistent read-modify-write positions.
   CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&res_pos, vbo_pos,
-                                          cudaGraphicsMapFlagsNone));
+                                          cudaGraphicsRegisterFlagsWriteDiscard));
   CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&res_col, vbo_col,
-                                          cudaGraphicsMapFlagsNone));
+                                          cudaGraphicsRegisterFlagsWriteDiscard));
 
   GLuint program = make_program(kVertexShader, kFragmentShader);
 

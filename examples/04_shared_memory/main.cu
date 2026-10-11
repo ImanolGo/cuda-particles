@@ -4,13 +4,14 @@
 //  Build & run:   make run-04_shared_memory
 //
 //  Global memory (VRAM) is far away. Shared memory is a small scratchpad
-//  *inside each SM*, shared by every thread of a block, and roughly two orders
-//  of magnitude faster. The catch: it is tiny (a few tens of KB per block) and
+//  *inside each SM*, shared by every thread of a block, with much lower latency.
+//  Actual benefit depends on caches, access patterns and bank conflicts.
+//  The catch: it is tiny (a few tens of KB per block) and
 //  you must synchronise threads with __syncthreads().
 //
 //  A matrix transpose is the classic reason to reach for it. In the naive
 //  version, reading a column means stride-n access: every thread in a warp
-//  touches a different 128-byte cache line, so you get terrible coalescing.
+//  touches a distant memory segment, so you get terrible coalescing.
 //
 //  The trick: load 32x32 tile contiguously (coalesced reads), park it in
 //  shared memory, __syncthreads(), then write it out transposed (coalesced
@@ -26,7 +27,7 @@
 
 #include "cuda_check.h"
 
-constexpr int N = 1024;      // matrix is N x N
+constexpr int N = 1027;      // non-tile-aligned: exercise boundary guards too
 constexpr int TILE = 32;     // tile / block edge (32x32 = 1024 threads/block)
 
 // --- naive: read strided, write coalesced (or vice versa, either way it hurts)
@@ -35,7 +36,7 @@ __global__ void transpose_naive(const float* __restrict__ in,
   const int x = blockIdx.x * TILE + threadIdx.x;  // column
   const int y = blockIdx.y * TILE + threadIdx.y;  // row
   if (x < n && y < n) {
-    out[x * n + y] = in[y * n + x];   // consecutive threads read n floats apart
+    out[x * n + y] = in[y * n + x];   // coalesced reads, strided writes
   }
 }
 
@@ -77,7 +78,7 @@ int main() {
   CUDA_CHECK(cudaMemcpy(d_in, h_in, bytes, cudaMemcpyHostToDevice));
 
   const dim3 block(TILE, TILE);
-  const dim3 grid(N / TILE, N / TILE);
+  const dim3 grid((N + TILE - 1) / TILE, (N + TILE - 1) / TILE);
 
   cudaEvent_t start, stop;
   CUDA_CHECK(cudaEventCreate(&start));
@@ -87,9 +88,11 @@ int main() {
   auto time_it = [&](auto launch) {
     // warm-up, then time `reps` launches back to back
     launch();
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaEventRecord(start));
     for (int i = 0; i < reps; ++i) launch();
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaEventRecord(stop));
     CUDA_CHECK(cudaEventSynchronize(stop));
     float ms = 0;
@@ -98,19 +101,23 @@ int main() {
   };
 
   const float ms_naive = time_it([&] { transpose_naive<<<grid, block>>>(d_in, d_out, N); });
+  CUDA_CHECK(cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost));
+  int wrong = 0;
+  for (int y = 0; y < N; ++y)
+    for (int x = 0; x < N; ++x)
+      if (h_out[x * N + y] != h_in[y * N + x]) ++wrong;
   const float ms_tiled = time_it([&] { transpose_tiled<<<grid, block>>>(d_in, d_out, N); });
 
   // --- correctness against a CPU transpose
   CUDA_CHECK(cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost));
-  int wrong = 0;
-  for (int y = 0; y < N && wrong == 0; y += 97) {        // spot-check
-    for (int x = 0; x < N; x += 89) {
+  for (int y = 0; y < N; ++y) {
+    for (int x = 0; x < N; ++x) {
       if (h_out[x * N + y] != h_in[y * N + x]) ++wrong;
     }
   }
 
   std::printf("matrix    : %d x %d floats (%.1f MB)\n", N, N, bytes / 1048576.0);
-  std::printf("block     : %dx%d   grid: %dx%d\n", TILE, TILE, N / TILE, N / TILE);
+  std::printf("block     : %dx%d   grid: %ux%u\n", TILE, TILE, grid.x, grid.y);
   std::printf("naive     : %8.3f ms\n", ms_naive);
   std::printf("tiled     : %8.3f ms   (%.2fx faster)\n", ms_tiled,
               ms_naive / ms_tiled);
@@ -122,5 +129,5 @@ int main() {
   CUDA_CHECK(cudaFree(d_out));
   std::free(h_in);
   std::free(h_out);
-  return EXIT_SUCCESS;
+  return wrong == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

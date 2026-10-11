@@ -7,10 +7,12 @@ install" goes wrong:
 |---|---|---|
 | **GPU driver** | Talks to the card. Provides `nvidia-smi` and `/dev/nvidia*`. | your distro (`nvidia-open`, `nvidia`…) |
 | **CUDA Toolkit** | `nvcc`, headers, libraries. This is what *compiles* your code. | `cuda` package / NVIDIA installer |
-| **Runtime** | `libcudart`, ships with the driver **and** the toolkit. | comes along for free |
+| **CUDA libraries** | `libcuda` is the driver API; `libcudart` is the CUDA runtime. | driver provides `libcuda`; toolkit provides `libcudart` |
 
-The driver exposes a maximum CUDA version; the toolkit must be **≤** that.
-On your machine:
+The CUDA version shown by `nvidia-smi` describes driver support, **not** your
+installed toolkit. Keeping the toolkit within that version is the simplest
+setup; NVIDIA also documents minor-version and forward-compatibility exceptions.
+For example:
 
 ```
 $ nvidia-smi
@@ -27,7 +29,9 @@ So a CUDA 13.x toolkit is a perfect fit.
 ### Arch / CachyOS / Manjaro
 
 ```bash
-sudo pacman -S cuda          # pulls nvcc into /opt/cuda  (~4 GB)
+sudo pacman -S cuda glfw libglvnd pkgconf make gcc
+# CUDA installs nvcc into /opt/cuda. GLFW 3.4+ and OpenGL headers are needed
+# for the windowed programs (the build also links GL into console lessons).
 ```
 
 Then make it reachable from your shell:
@@ -50,11 +54,13 @@ sudo pacman -S nsight-compute nsight-systems    # `ncu` and `nsys` profilers
 ### Other systems
 
 * **Ubuntu / Debian** — `sudo apt install nvidia-cuda-toolkit` (often old) or
-  use NVIDIA's official `.deb` repo for the newest build.
+  use NVIDIA's official `.deb` repo for the newest build. Also install build
+  tools, `pkg-config`, OpenGL development headers, and **GLFW 3.4+**; older
+  distribution GLFW packages lack the platform-selection APIs used here.
 * **Fedora** — `sudo dnf install cuda-toolkit`.
-* **Windows** — the CUDA Toolkit installer from NVIDIA; build from a
-  "x64 Native Tools" prompt. Everything in this repo works, but the window
-  examples use GLFW which is a Linux-flavoured setup here.
+* **Windows** — the CUDA Toolkit installer from NVIDIA supports the console
+  lessons. This repository's Makefile and GL setup target Linux; windowed
+  programs need platform/build adjustments and an OpenGL function loader.
 
 ---
 
@@ -80,7 +86,7 @@ printing their global ids. If that runs, your toolchain is healthy.
 ## 3. The one number that matters: compute capability
 
 Every NVIDIA GPU has a **compute capability** (`sm_XY`) that describes which
-instructions it understands. In CUDA 9+ you no longer need to know it by hand:
+instructions it understands. Modern toolkits can detect it at build time:
 
 ```bash
 nvcc -arch=native ...        # nvcc asks the GPU and compiles for it
@@ -161,3 +167,8 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia make run-particles
 Check it worked: the program prints `GL renderer` — it must say *NVIDIA*
 before CUDA interop can succeed. `make run-X` applies `prime-run` automatically
 when it is installed (`nvidia-prime`); disable with `make run-X RUN=`.
+
+If CUDA works but GL cannot run on NVIDIA, the final project offers an explicit
+copy-based fallback: `make run-particles RUN= ARGS="--staged"`. This is not
+zero-copy interop. If `nvidia-smi` reports a driver/library mismatch, finish the
+driver update and reboot so the kernel module and userspace libraries match.

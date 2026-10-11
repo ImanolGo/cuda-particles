@@ -11,16 +11,17 @@
 //  * Streams — independent queues of work. Put chunk A's copy, compute and
 //    copy-back in stream 0, chunk B's in stream 1, and the GPU can do a
 //    transfer while another stream is busy computing. This is the cheapest
-//    speed-up available to almost any real program.
+//    potential speed-up; actual overlap depends on copy engines and workload.
 //
 //  The catch: cudaMemcpyAsync only overlaps if the host memory is *pinned*
-//  (page-locked). With ordinary pageable memory the driver quietly makes the
-//  copy synchronous and you get exactly zero benefit.
+//  (page-locked). Pageable memory may require staging and block the host;
+//  do not rely on it for asynchronous overlap.
 // -----------------------------------------------------------------------------
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 #include "cuda_check.h"
 
@@ -65,6 +66,7 @@ int main() {
   CUDA_CHECK(cudaMalloc(&d_noise, chunk_bytes * CHUNKS));
   CUDA_CHECK(cudaMalloc(&d_out, chunk_bytes * CHUNKS));
   CUDA_CHECK(cudaMemset(d_noise, 0, chunk_bytes * CHUNKS));
+  CUDA_CHECK(cudaMemcpy(d_in, h_in, chunk_bytes * CHUNKS, cudaMemcpyHostToDevice));
 
   const int block = 256;
   const int grid = (CHUNK + block - 1) / block;
@@ -80,11 +82,13 @@ int main() {
 
     const int reps = 30;
     heavy_kernel<<<grid, block>>>(d_in, d_noise, d_out, CHUNK);  // warm-up
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaEventRecord(start));
     for (int r = 0; r < reps; ++r) {
       heavy_kernel<<<grid, block>>>(d_in, d_noise, d_out, CHUNK);
+      CUDA_CHECK(cudaGetLastError());
     }
     CUDA_CHECK(cudaEventRecord(stop));
     CUDA_CHECK(cudaEventSynchronize(stop));
@@ -111,10 +115,12 @@ int main() {
     CUDA_CHECK(cudaMemcpy(d_in + off, h_in + off, chunk_bytes,
                           cudaMemcpyHostToDevice));
     heavy_kernel<<<grid, block>>>(d_in + off, d_noise + off, d_out + off, CHUNK);
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaMemcpy(h_out + off, d_out + off, chunk_bytes,
                           cudaMemcpyDeviceToHost));
   }
   const double serial_ms = now_ms() - t_serial;
+  const std::vector<float> serial_result(h_out, h_out + n);
   std::printf("  %.2f ms\n", serial_ms);
 
   // ===========================================================================
@@ -133,7 +139,8 @@ int main() {
     CUDA_CHECK(cudaMemcpyAsync(d_in + off, h_in + off, chunk_bytes,
                                cudaMemcpyHostToDevice, s));
     heavy_kernel<<<grid, block, 0, s>>>(d_in + off, d_noise + off, d_out + off,
-                                        CHUNK);
+                                         CHUNK);
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaMemcpyAsync(h_out + off, d_out + off, chunk_bytes,
                                cudaMemcpyDeviceToHost, s));
   }
@@ -144,9 +151,16 @@ int main() {
 
   // ---- sanity: both paths produce the same answer --------------------------
   double sum = 0.0;
-  for (int i = 0; i < n; ++i) sum += h_out[i];
-  std::printf("\nchecksum: %.3f  (finite and stable means the overlap is correct)\n",
-              sum);
+  int wrong = 0;
+  for (int i = 0; i < n; ++i) {
+    float reference = h_in[i];
+    for (int k = 0; k < 512; ++k) reference = std::fma(reference, 1.0000001f, 1e-7f);
+    if (!std::isfinite(h_out[i]) || h_out[i] != serial_result[i] ||
+        std::fabs(h_out[i] - reference) > 1e-5f) ++wrong;
+    sum += h_out[i];
+  }
+  std::printf("\nchecksum: %.3f  | serial / streams / CPU agree: %s\n",
+              sum, wrong == 0 ? "yes" : "NO");
 
   for (int c = 0; c < CHUNKS; ++c) CUDA_CHECK(cudaStreamDestroy(streams[c]));
   CUDA_CHECK(cudaFree(d_in));
@@ -154,5 +168,5 @@ int main() {
   CUDA_CHECK(cudaFree(d_out));
   CUDA_CHECK(cudaFreeHost(h_in));
   CUDA_CHECK(cudaFreeHost(h_out));
-  return EXIT_SUCCESS;
+  return wrong == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

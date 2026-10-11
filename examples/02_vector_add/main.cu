@@ -40,7 +40,7 @@ __global__ void vector_add(const float* __restrict__ a,
 }
 
 int main() {
-  const int n = 1 << 20;                      // 1,048,576 floats
+  const int n = (1 << 20) + 3;                // exercise the final block's guard
   const size_t bytes = n * sizeof(float);
 
   // ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ int main() {
   int wrong = 0;
   for (int i = 0; i < n; ++i) {
     const float expected = h_a[i] + h_b[i];
-    if (std::fabs(h_c[i] - expected) > 1e-5f) {
+    if (!std::isfinite(h_c[i]) || std::fabs(h_c[i] - expected) > 1e-5f) {
       if (wrong++ < 5) {
         std::printf("  mismatch at %d: got %f expected %f\n", i, h_c[i], expected);
       }
@@ -111,5 +111,5 @@ int main() {
   std::free(h_a);
   std::free(h_b);
   std::free(h_c);
-  return EXIT_SUCCESS;
+  return wrong == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

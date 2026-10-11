@@ -13,8 +13,8 @@
 //
 //      pos : x, y  = world position      (orthographic space, y up)
 //            z     = speed, packed here so the vertex shader can size the point
-//            w     = reserved
-//      vel : x, y  = velocity
+//            w     = per-particle brightness variation
+//      vel : x, y  = velocity, z = birth radius, w = palette variation
 //      col : rgba  = 8-bit colour, already normalised for the vertex shader
 //
 //  pos and col live inside OpenGL vertex buffers, so there is no copy: CUDA
@@ -22,11 +22,11 @@
 // -----------------------------------------------------------------------------
 
 // Everything the simulation needs to know about "right now".
-// Note the order: float2 members come first so the struct stays 4-byte aligned
-// on both sides.
+// CUDA float2 has 8-byte alignment; the same declaration is used on both sides.
 struct Params {
   float2 mouse;       // cursor position, in world space
   float2 bounds;      // half-extents of the visible area
+  float2 mouse_velocity; // dragging injects momentum into the local field
   float dt;           // seconds since the previous frame
   float time;         // seconds since start (used to reseed the jitter)
   float attraction;   // > 0 pull toward the cursor, < 0 push away, 0 idle
@@ -35,11 +35,13 @@ struct Params {
   float jitter;       // random agitation (keeps the cloud breathing)
   float radius;       // gaussian falloff radius of the cursor force
   int count;          // number of particles
+  int scene;          // 0 = orbit, 1 = aurora, 2 = ink
+  int palette;        // 0 = ice/fire, 1 = aurora, 2 = neon
 };
 
-// Fill the buffers with a gently rotating disc of particles.
+// Fill the buffers with spiral arms, aurora bands, or a uniform ink field.
 void particles_init(float4* pos, float4* vel, uchar4* col, int count,
-                    unsigned seed, float2 bounds, cudaStream_t stream);
+                    unsigned seed, float2 bounds, int scene, cudaStream_t stream);
 
 // Advance the simulation by one step.
 void particles_update(float4* pos, float4* vel, uchar4* col, Params p,

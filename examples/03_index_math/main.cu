@@ -16,6 +16,7 @@
 // -----------------------------------------------------------------------------
 
 #include <cstdio>
+#include <cmath>
 
 #include "cuda_check.h"
 
@@ -42,6 +43,8 @@ __global__ void fill_matrix(float* __restrict__ m, int width, int height) {
 // -----------------------------------------------------------------------------
 //  B. Grid-stride loop: sum an array of any length with a fixed grid.
 //     No bounds check is even needed inside — the loop condition handles it.
+//     The loop works with any launch size; this reduction requires a power-of-
+//     two block size, at most 256, and a one-dimensional block.
 // -----------------------------------------------------------------------------
 __global__ void grid_stride_sum(const float* __restrict__ in,
                                 float* __restrict__ out, int n) {
@@ -74,7 +77,7 @@ __global__ void grid_stride_sum(const float* __restrict__ in,
 }
 
 int main() {
-  const int width = 8;
+  const int width = 7;  // not a multiple of the block dimensions
   const int height = 6;
   const int cells = width * height;
 
@@ -92,7 +95,7 @@ int main() {
   fill_matrix<<<grid2d, block2d>>>(d_m, width, height);
   CUDA_CHECK_KERNEL();
 
-  float h_m[48];
+  float h_m[cells];
   CUDA_CHECK(cudaMemcpy(h_m, d_m, cells * sizeof(float), cudaMemcpyDeviceToHost));
   for (int row = 0; row < height; ++row) {
     for (int col = 0; col < width; ++col) {
@@ -101,6 +104,8 @@ int main() {
     std::printf("\n");
   }
   CUDA_CHECK(cudaFree(d_m));
+  bool correct = true;
+  for (int i = 0; i < cells; ++i) correct &= h_m[i] == static_cast<float>(i);
 
   // ---------------------------------------------------------------------------
   //  Part B — grid-stride loop over a deliberately awkward size
@@ -149,5 +154,7 @@ int main() {
   CUDA_CHECK(cudaFree(d_in));
   CUDA_CHECK(cudaFree(d_out));
   std::free(h_in);
-  return EXIT_SUCCESS;
+  correct &= std::isfinite(total) && std::fabs(total - reference) < reference * 1e-5;
+  std::printf("  correct        : %s\n", correct ? "yes" : "NO");
+  return correct ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-//  shaders.h — the two GLSL programs the particle system needs
+//  shaders.h — point sprites, trail fade, bloom, and presentation
 // -----------------------------------------------------------------------------
 #pragma once
 
@@ -33,13 +33,54 @@ inline constexpr const char* kPointFragment = R"GLSL(
 #version 330 core
 
 in vec4 vCol;
+uniform float uIntensity;
 out vec4 fragColor;
 
 void main() {
     // gl_PointCoord goes 0..1 across the point sprite; make a round, soft dot.
     vec2 d = gl_PointCoord - vec2(0.5);
-    float alpha = smoothstep(0.25, 0.0, dot(d, d));
-    fragColor = vec4(vCol.rgb, vCol.a * alpha);
+    // Reversed smoothstep edges are undefined in GLSL; subtract instead.
+    float alpha = exp(-dot(d, d) * 24.0) * (1.0 - smoothstep(0.16, 0.25, dot(d, d)));
+    fragColor = vec4(vCol.rgb, vCol.a * alpha * uIntensity);
+}
+)GLSL";
+
+// Separable Gaussian blur, run horizontally then vertically at quarter size.
+inline constexpr const char* kBlurFragment = R"GLSL(
+#version 330 core
+uniform sampler2D uImage;
+uniform vec2 uDirection;
+uniform vec2 uResolution;
+out vec4 fragColor;
+void main() {
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    vec2 stepUV = uDirection / vec2(textureSize(uImage, 0));
+    vec3 c = texture(uImage, uv).rgb * 0.227027;
+    c += (texture(uImage, uv + stepUV * 1.384615).rgb +
+          texture(uImage, uv - stepUV * 1.384615).rgb) * 0.316216;
+    c += (texture(uImage, uv + stepUV * 3.230769).rgb +
+          texture(uImage, uv - stepUV * 3.230769).rgb) * 0.070270;
+    fragColor = vec4(c, 1.0);
+}
+)GLSL";
+
+inline constexpr const char* kPresentFragment = R"GLSL(
+#version 330 core
+uniform sampler2D uImage;
+uniform sampler2D uBloom;
+uniform vec2 uResolution;
+uniform float uExposure;
+uniform float uGlow;
+out vec4 fragColor;
+void main() {
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    vec3 light = texture(uImage, uv).rgb + texture(uBloom, uv).rgb * uGlow;
+    // Exponential tone mapping preserves colour instead of clipping to white.
+    vec3 c = 1.0 - exp(-light * uExposure);
+    float vignette = 1.0 - 0.48 * dot(uv - 0.5, uv - 0.5);
+    c = pow(c, vec3(0.8)) * vignette;
+    c += vec3(0.008, 0.014, 0.030) * (0.6 + 0.4 * (1.0 - uv.y));
+    fragColor = vec4(c, 1.0);
 }
 )GLSL";
 

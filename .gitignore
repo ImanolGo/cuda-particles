@@ -18,3 +18,7 @@ build/
 *.swp
 .DS_Store
 compile_commands.json
+
+# Python capture/test helpers
+__pycache__/
+*.pyc

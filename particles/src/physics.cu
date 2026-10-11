@@ -7,7 +7,7 @@
 //
 //  The "physics" is deliberately cheap and stable rather than accurate:
 //
-//    * an inverse-square attraction toward (or away from) the cursor,
+//    * a softened radial attraction toward (or away from) the cursor,
 //      damped by a gaussian so only nearby particles react;
 //    * a tangential swirl around the cursor, which is what makes it curl;
 //    * a tiny random kick so the cloud never fully freezes;
@@ -58,15 +58,17 @@ __device__ __forceinline__ float rnd01(unsigned& state) {
 //  smooth, saturated rainbow without any branching — a classic creative-coding
 //  trick that maps perfectly onto a GPU.
 // -----------------------------------------------------------------------------
-__device__ __forceinline__ float3 palette(float t) {
-  const float3 a = make_float3(0.55f, 0.45f, 0.55f);
-  const float3 b = make_float3(0.45f, 0.45f, 0.45f);
-  const float3 c = make_float3(1.00f, 1.00f, 1.00f);
-  const float3 d = make_float3(0.00f, 0.20f, 0.45f);
-  return make_float3(
-      a.x + b.x * __cosf(kTau * (c.x * t + d.x)),
-      a.y + b.y * __cosf(kTau * (c.y * t + d.y)),
-      a.z + b.z * __cosf(kTau * (c.z * t + d.z)));
+__device__ __forceinline__ float3 palette(float t, int style) {
+  if (style == 0) {  // glacial cyan -> lavender -> molten amber
+    const float h = 0.5f + 0.5f * __sinf(kTau * t);
+    return make_float3(0.12f + 0.88f * h, 0.38f + 0.40f * (1.0f - h),
+                      1.0f - 0.88f * h);
+  }
+  const float3 phase = style == 1 ? make_float3(0.45f, 0.05f, 0.20f)
+                                 : make_float3(0.00f, 0.30f, 0.65f);
+  return make_float3(0.52f + 0.48f * __cosf(kTau * (t + phase.x)),
+                    0.52f + 0.48f * __cosf(kTau * (t + phase.y)),
+                    0.52f + 0.48f * __cosf(kTau * (t + phase.z)));
 }
 
 __device__ __forceinline__ unsigned char to_byte(float v) {
@@ -78,7 +80,7 @@ __device__ __forceinline__ unsigned char to_byte(float v) {
 // =============================================================================
 __global__ void init_kernel(float4* __restrict__ pos, float4* __restrict__ vel,
                             uchar4* __restrict__ col, int n, unsigned seed,
-                            float2 bounds) {
+                            float2 bounds, int scene) {
   const int i = blockIdx.x * kBlock + threadIdx.x;
   if (i >= n) return;
 
@@ -86,18 +88,31 @@ __global__ void init_kernel(float4* __restrict__ pos, float4* __restrict__ vel,
 
   // Uniform point in a disc: sqrt() of a uniform radius is the trick that
   // avoids clustering everything in the middle.
-  const float angle = rnd01(s) * kTau;
-  const float r = sqrtf(rnd01(s));
-  const float2 p = make_float2(__cosf(angle) * r * bounds.x * 0.65f,
+  float angle = rnd01(s) * kTau;
+  float r = sqrtf(rnd01(s));
+  if (scene == 0) {
+    r = (0.12f + r * 0.76f) * fminf(bounds.x, bounds.y);
+    angle = (i % 3) * kTau / 3.0f + r * 5.0f + (rnd01(s) - 0.5f) * 0.42f;
+  }
+  float2 p = make_float2(__cosf(angle) * r * bounds.x * 0.65f,
                                __sinf(angle) * r * bounds.y * 0.65f);
+  if (scene == 0) p = make_float2(__cosf(angle) * r, __sinf(angle) * r);
+  if (scene == 1) {
+    p.x = (rnd01(s) * 2.0f - 1.0f) * bounds.x;
+    p.y = (static_cast<float>(i % 5) - 2.0f) * 0.22f +
+          0.14f * __sinf(p.x * 2.5f) + (rnd01(s) - 0.5f) * 0.075f;
+  }
+  if (scene == 2) p = make_float2((rnd01(s) * 2.0f - 1.0f) * bounds.x,
+                                 (rnd01(s) * 2.0f - 1.0f) * bounds.y);
 
   // A tangential kick gives the disc a lazy rotation from frame one.
   const float spin = 0.15f + 0.35f * rnd01(s);
   const float2 v = make_float2(-p.y * spin, p.x * spin);
 
-  pos[i] = make_float4(p.x, p.y, 0.0f, 1.0f);
-  vel[i] = make_float4(v.x, v.y, 0.0f, 0.0f);
-  col[i] = make_uchar4(0, 0, 0, 255);  // first update colours them properly
+  pos[i] = make_float4(p.x, p.y, 0.0f, 0.35f + 0.65f * rnd01(s));
+  vel[i] = make_float4(v.x, v.y, sqrtf(p.x * p.x + p.y * p.y), rnd01(s));
+  const float3 c = palette(r, scene);
+  col[i] = make_uchar4(to_byte(c.x), to_byte(c.y), to_byte(c.z), 80);
 }
 
 // =============================================================================
@@ -111,6 +126,29 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   float4 P = pos[i];
   float4 V = vel[i];
 
+  // Three cheap analytic fields, not an N-body solver. No neighbour reads.
+  // Relax velocity toward a moving field: coherent structures survive even
+  // when nobody is touching the mouse. vel.z stores each orbit's birth radius.
+  float2 flow;
+  if (p.scene == 0) {
+    const float r = sqrtf(P.x * P.x + P.y * P.y + 1e-5f);
+    const float omega = 0.32f / (0.22f + r);
+    const float radial = (V.z - r) * 1.8f;
+    flow = make_float2(-P.y * omega + P.x / r * radial,
+                       P.x * omega + P.y / r * radial);
+  } else if (p.scene == 1) {
+    flow = make_float2(0.35f + 0.16f * __cosf(P.y * 4.0f + p.time * 0.3f),
+                      0.28f * __cosf(P.x * 2.5f - p.time * 0.45f) +
+                      0.12f * __sinf(P.x * 5.0f + P.y * 3.0f));
+  } else {
+    // Curl of a sinusoidal stream function: divergence-free before damping.
+    flow = make_float2(0.42f * __sinf(P.x * 3.0f + p.time * 0.2f) * __cosf(P.y * 3.0f),
+                     -0.42f * __cosf(P.x * 3.0f + p.time * 0.2f) * __sinf(P.y * 3.0f));
+  }
+  const float follow = 1.0f - __expf(-2.0f * p.dt);
+  V.x += (flow.x - V.x) * follow;
+  V.y += (flow.y - V.y) * follow;
+
   // ---------------------------------------------------------------------------
   //  Force from the cursor.
   // ---------------------------------------------------------------------------
@@ -123,7 +161,7 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   const float falloff = __expf(-r2 / (p.radius * p.radius));
 
   // The (1 - core^2/r^2) factor makes the force vanish at a small "core"
-  // radius and turn repulsive inside it. Without it a 1/r^2 attraction would
+  // radius and turn repulsive inside it. Without it a radial attraction would
   // suck every particle into a single dot on the cursor; with it the cloud
   // settles into a vortex instead. Cheap self-limiting behaviour — a very
   // common trick in interactive simulations.
@@ -139,6 +177,8 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   const float2 tangent = make_float2(-d.y, d.x);
   V.x += tangent.x * inv_r * force * p.swirl;
   V.y += tangent.y * inv_r * force * p.swirl;
+  V.x += p.mouse_velocity.x * falloff * p.dt * 3.0f;
+  V.y += p.mouse_velocity.y * falloff * p.dt * 3.0f;
 
   // ---------------------------------------------------------------------------
   //  A pinch of noise so the field never goes completely still.
@@ -155,6 +195,11 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   const float decay = __expf(-p.damping * p.dt);
   V.x *= decay;
   V.y *= decay;
+  const float speed2 = V.x * V.x + V.y * V.y;
+  if (speed2 > 9.0f) {  // limit impulses from fast cursor jumps / strong clicks
+    const float limit = 3.0f * rsqrtf(speed2);
+    V.x *= limit; V.y *= limit;
+  }
 
   // ---------------------------------------------------------------------------
   //  Integrate (semi-implicit Euler) and keep everything on screen.
@@ -162,6 +207,12 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   P.x += V.x * p.dt;
   P.y += V.y * p.dt;
 
+  if (p.scene != 0) {
+    if (P.x > p.bounds.x) P.x -= 2.0f * p.bounds.x;
+    if (P.x < -p.bounds.x) P.x += 2.0f * p.bounds.x;
+    if (P.y > p.bounds.y) P.y -= 2.0f * p.bounds.y;
+    if (P.y < -p.bounds.y) P.y += 2.0f * p.bounds.y;
+  }
   if (P.x > p.bounds.x) { P.x = p.bounds.x;  V.x = -fabsf(V.x) * 0.6f; }
   if (P.x < -p.bounds.x) { P.x = -p.bounds.x; V.x = fabsf(V.x) * 0.6f; }
   if (P.y > p.bounds.y) { P.y = p.bounds.y;  V.y = -fabsf(V.y) * 0.6f; }
@@ -173,8 +224,9 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   // ---------------------------------------------------------------------------
   const float speed = sqrtf(V.x * V.x + V.y * V.y);
   const float hue = atan2f(V.y, V.x) * kInvTau + 0.5f;
-  float3 c = palette(hue);
-  const float bright = fminf(1.0f, 0.18f + speed * 0.55f);
+  float3 c = palette(p.scene == 0 ? V.z * 0.9f + V.w * 0.12f : hue * 0.5f + P.x * 0.15f,
+                     p.palette);
+  const float bright = fminf(1.0f, 0.40f + speed * 0.35f);
   c.x *= bright;
   c.y *= bright;
   c.z *= bright;
@@ -184,7 +236,8 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
 
   pos[i] = P;
   vel[i] = V;
-  col[i] = make_uchar4(to_byte(c.x), to_byte(c.y), to_byte(c.z), 255);
+  col[i] = make_uchar4(to_byte(c.x), to_byte(c.y), to_byte(c.z),
+                      to_byte(0.08f + P.w * 0.12f));
 }
 
 }  // namespace
@@ -194,9 +247,9 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
 //  geometry and keep the kernel names out of the GL code.
 // -----------------------------------------------------------------------------
 void particles_init(float4* pos, float4* vel, uchar4* col, int count,
-                    unsigned seed, float2 bounds, cudaStream_t stream) {
+                    unsigned seed, float2 bounds, int scene, cudaStream_t stream) {
   const int grid = (count + kBlock - 1) / kBlock;
-  init_kernel<<<grid, kBlock, 0, stream>>>(pos, vel, col, count, seed, bounds);
+  init_kernel<<<grid, kBlock, 0, stream>>>(pos, vel, col, count, seed, bounds, scene);
   CUDA_CHECK(cudaGetLastError());
 }
 

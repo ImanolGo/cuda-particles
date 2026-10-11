@@ -25,6 +25,7 @@ NVCC      ?= $(shell command -v nvcc 2>/dev/null || echo /opt/cuda/bin/nvcc)
 ARCH      ?= native
 BUILD     ?= build
 GL_LIBS   := $(shell pkg-config --libs glfw3 gl 2>/dev/null || echo -lglfw -lGL)
+GL_CFLAGS := $(shell pkg-config --cflags glfw3 gl 2>/dev/null)
 
 NVCCFLAGS := -O2 -std=c++17 -lineinfo -arch=$(ARCH) -Xcompiler -Wall
 
@@ -45,12 +46,12 @@ all: $(addprefix $(BUILD)/,$(EXAMPLES)) $(BUILD)/particles
 
 # -----------------------------------------------------------------------------
 #  Examples:  build/<name>  from  examples/<name>/main.cu
-#  (GL is linked into every example — harmless for the CPU-only ones and it
+#  (GL is linked into every example — harmless for the console-only ones and it
 #   keeps this Makefile free of special cases.)
 # -----------------------------------------------------------------------------
 $(BUILD)/%: examples/%/main.cu common/cuda_check.h | $(BUILD)
 	@echo "  NVCC  $<"
-	@$(NVCC) $(NVCCFLAGS) -Icommon -o $@ $< $(GL_LIBS)
+	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -o $@ $< $(GL_LIBS)
 
 # Convenience aliases so `make 01_hello` works as well as `make run-01_hello`.
 $(EXAMPLES): %: $(BUILD)/%
@@ -60,7 +61,7 @@ $(EXAMPLES): %: $(BUILD)/%
 # -----------------------------------------------------------------------------
 $(BUILD)/particles: $(PARTICLE_SRC) $(PARTICLE_HDR) common/cuda_check.h | $(BUILD)
 	@echo "  NVCC  particles ($(words $(PARTICLE_SRC)) translation units)"
-	@$(NVCC) $(NVCCFLAGS) -Icommon -Iparticles/src -o $@ $(PARTICLE_SRC) $(GL_LIBS)
+	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -Iparticles/src -o $@ $(PARTICLE_SRC) $(GL_LIBS)
 
 particles: $(BUILD)/particles
 
@@ -75,15 +76,29 @@ RUN ?= $(shell command -v prime-run 2>/dev/null)
 
 run-%: $(BUILD)/%
 	@echo "▶ $(if $(RUN),$(RUN) ,)$(BUILD)/$*"
-	@$(RUN) ./$(BUILD)/$*
+	@$(RUN) ./$(BUILD)/$* $(ARGS)
+
+# Numerical lessons return nonzero when their reference checks fail.
+$(BUILD)/test_physics: tests/physics.cu particles/src/physics.cu particles/src/particles.cuh common/cuda_check.h | $(BUILD)
+	@$(NVCC) $(NVCCFLAGS) -Icommon -Iparticles/src -o $@ tests/physics.cu particles/src/physics.cu
+
+check: $(addprefix $(BUILD)/,$(filter-out 06_interop,$(EXAMPLES))) $(BUILD)/test_physics
+	@set -e; for example in $(filter-out 06_interop,$(EXAMPLES)); do ./$(BUILD)/$$example; done
+	@./$(BUILD)/test_physics
+
+demo: $(BUILD)/particles
+	@$(RUN) ./$(BUILD)/particles --demo $(ARGS)
+
+gif: $(BUILD)/particles
+	@python3 scripts/record_demo.py --runner "$(RUN)" $(ARGS)
 
 doctor:
 	@echo "nvcc        : $(NVCC)"
 	@$(NVCC) --version || echo "  (nvcc not found — see docs/00_setup.md)"
 	@echo
 	@echo "GPU         :"
-	@nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv 2>/dev/null \
-		|| echo "  (nvidia-smi unavailable)"
+	@nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv \
+		|| echo "  (check NVIDIA installation / driver-library mismatch; see README)"
 
 $(BUILD):
 	@mkdir -p $@
@@ -91,4 +106,4 @@ $(BUILD):
 clean:
 	@rm -rf $(BUILD)
 
-.PHONY: all clean doctor particles $(EXAMPLES)
+.PHONY: all clean doctor check demo gif particles $(EXAMPLES)
