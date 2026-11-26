@@ -34,6 +34,9 @@ struct Params {
   float damping;      // velocity decay, in units of 1/second
   float jitter;       // random agitation (keeps the cloud breathing)
   float radius;       // gaussian falloff radius of the cursor force
+  float flow_boost;   // extra scene-flow speed, 0 = as designed (audio: mids)
+  float sparkle;      // chance of a particle flashing this step, 0..1 (audio: highs)
+  float hue_shift;    // offset added to every palette lookup (audio: snares)
   int count;          // number of particles
   int scene;          // 0 = orbit, 1 = aurora, 2 = ink
   int palette;        // 0 = ice/fire, 1 = aurora, 2 = neon

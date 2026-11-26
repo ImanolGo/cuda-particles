@@ -5,10 +5,11 @@
 #  Everyday commands
 #  -----------------
 #     make                  build every example + the particle system
-#     make 01_hello         build one example  (01_hello .. 06_interop)
+#     make 01_hello         build one example  (01_hello .. 08_audio_input)
 #     make run-01_hello     build & run it
 #     make particles        build the final project
 #     make run-particles    build & run the final project
+#     make listen           the final project, reacting to what is playing
 #     make doctor           print toolkit / GPU info
 #     make clean
 #
@@ -19,6 +20,7 @@
 #     UNSUPPORTED=1         add -allow-unsupported-compiler.
 #                           Needed if nvcc rejects your (very new) host GCC.
 #     NVCC=/path/to/nvcc    use a specific toolkit, e.g. /opt/cuda-12.6/bin/nvcc
+#     AUDIO=0               build without live audio capture (libpulse)
 # =============================================================================
 
 NVCC      ?= $(shell command -v nvcc 2>/dev/null || echo /opt/cuda/bin/nvcc)
@@ -34,7 +36,24 @@ NVCCFLAGS += -allow-unsupported-compiler
 endif
 
 EXAMPLES  := 01_hello 02_vector_add 03_index_math 04_shared_memory \
-             05_timing_streams 06_interop
+             05_timing_streams 06_interop 07_audio_fft
+
+# Lesson 08 records live audio through PulseAudio/PipeWire (`libpulse`). It is
+# part of the default build only when that library is installed, so the rest of
+# the course never depends on it. `make run-08_audio_input` always tries.
+AUDIO_LIBS := $(patsubst -pthread,-Xcompiler -pthread,$(shell pkg-config --libs libpulse-simple 2>/dev/null))
+ifneq ($(AUDIO_LIBS),)
+EXAMPLES  += 08_audio_input
+endif
+# The particle system always links cuFFT (it ships with the toolkit); live
+# capture is compiled in only when libpulse exists. Opt out with AUDIO=0.
+ifneq ($(AUDIO),0)
+ifneq ($(AUDIO_LIBS),)
+PARTICLE_AUDIO := -DPARTICLES_AUDIO $(AUDIO_LIBS)
+endif
+endif
+# Lessons that need a window or live input cannot run unattended.
+INTERACTIVE := 06_interop 08_audio_input
 
 PARTICLE_SRC := $(wildcard particles/src/*.cu)
 PARTICLE_HDR := $(wildcard particles/src/*.cuh) $(wildcard particles/src/*.h)
@@ -51,7 +70,11 @@ all: $(addprefix $(BUILD)/,$(EXAMPLES)) $(BUILD)/particles
 # -----------------------------------------------------------------------------
 $(BUILD)/%: examples/%/main.cu common/cuda_check.h | $(BUILD)
 	@echo "  NVCC  $<"
-	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -o $@ $< $(GL_LIBS)
+	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -o $@ $< $(GL_LIBS) $(EXTRA_LIBS)
+
+# Lessons that need an extra CUDA library say so here.
+$(BUILD)/07_audio_fft: EXTRA_LIBS := -lcufft
+$(BUILD)/08_audio_input: EXTRA_LIBS = -lcufft $(or $(AUDIO_LIBS),-lpulse-simple -lpulse)
 
 # Convenience aliases so `make 01_hello` works as well as `make run-01_hello`.
 $(EXAMPLES): %: $(BUILD)/%
@@ -61,7 +84,7 @@ $(EXAMPLES): %: $(BUILD)/%
 # -----------------------------------------------------------------------------
 $(BUILD)/particles: $(PARTICLE_SRC) $(PARTICLE_HDR) common/cuda_check.h | $(BUILD)
 	@echo "  NVCC  particles ($(words $(PARTICLE_SRC)) translation units)"
-	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -Iparticles/src -o $@ $(PARTICLE_SRC) $(GL_LIBS)
+	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -Iparticles/src -o $@ $(PARTICLE_SRC) $(GL_LIBS) -lcufft $(PARTICLE_AUDIO)
 
 particles: $(BUILD)/particles
 
@@ -82,9 +105,12 @@ run-%: $(BUILD)/%
 $(BUILD)/test_physics: tests/physics.cu particles/src/physics.cu particles/src/particles.cuh common/cuda_check.h | $(BUILD)
 	@$(NVCC) $(NVCCFLAGS) -Icommon -Iparticles/src -o $@ tests/physics.cu particles/src/physics.cu
 
-check: $(addprefix $(BUILD)/,$(filter-out 06_interop,$(EXAMPLES))) $(BUILD)/test_physics
-	@set -e; for example in $(filter-out 06_interop,$(EXAMPLES)); do ./$(BUILD)/$$example; done
+check: $(addprefix $(BUILD)/,$(filter-out $(INTERACTIVE),$(EXAMPLES))) $(BUILD)/test_physics
+	@set -e; for example in $(filter-out $(INTERACTIVE),$(EXAMPLES)); do ./$(BUILD)/$$example; done
 	@./$(BUILD)/test_physics
+
+listen: $(BUILD)/particles
+	@$(RUN) ./$(BUILD)/particles --audio $(ARGS)
 
 demo: $(BUILD)/particles
 	@$(RUN) ./$(BUILD)/particles --demo $(ARGS)
@@ -106,4 +132,4 @@ $(BUILD):
 clean:
 	@rm -rf $(BUILD)
 
-.PHONY: all clean doctor check demo gif particles $(EXAMPLES)
+.PHONY: all clean doctor check demo listen gif particles $(EXAMPLES)

@@ -19,6 +19,7 @@
 //    06 interop            cudaGraphicsMap / Unmap, shared VBOs
 //
 //  New here: analytic flow fields, persistent HDR trails, and bloom/tone mapping.
+//  Part 2 (--audio): lessons 07 and 08 feed bass / mid / high into the forces.
 //  --staged is an explicit, slower copy-based path for non-NVIDIA GL contexts.
 //
 //  Controls
@@ -54,6 +55,7 @@
 #include <cuda_runtime.h>
 
 #include "cuda_check.h"
+#include "audio.h"
 #include "particles.cuh"
 #include "shaders.h"
 
@@ -245,6 +247,8 @@ void print_usage(const char* program) {
       "  --frames N  exit after N fixed 1/60-second frames\n"
       "  --capture DIR  write PPM frames to DIR (requires --frames)\n"
       "  --no-hud    hide the overlay\n"
+      "  --audio     react to what is playing (or --mic, --audio-device NAME)\n"
+      "  --audio-file F  react to a WAV, in step with the simulation clock\n"
       "\n"
       "controls:\n"
       "  mouse       the cloud follows and swirls around the cursor\n"
@@ -270,6 +274,9 @@ int main(int argc, char** argv) {
   int width = 1280, height = 720, frames = 0;
   bool staged = false;
   const char* capture = nullptr;
+  bool audio_live = false;
+  const char* audio_device = "@DEFAULT_MONITOR@";
+  const char* audio_file = nullptr;
 
   // Reject malformed values rather than silently turning typos into zero.
   auto number = [&](int& i, double low, double high, bool integer = false) {
@@ -309,6 +316,16 @@ int main(int argc, char** argv) {
       g.demo = true;
     } else if (std::strcmp(argv[i], "--no-hud") == 0) {
       g.hud = false;
+    } else if (std::strcmp(argv[i], "--audio") == 0) {
+      audio_live = true;
+    } else if (std::strcmp(argv[i], "--mic") == 0) {
+      audio_live = true;
+      audio_device = nullptr;  // nullptr = default input
+    } else if (std::strcmp(argv[i], "--audio-device") == 0 && i + 1 < argc) {
+      audio_live = true;
+      audio_device = argv[++i];
+    } else if (std::strcmp(argv[i], "--audio-file") == 0 && i + 1 < argc) {
+      audio_file = argv[++i];
     } else if (std::strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
       capture = argv[++i];
     } else if (std::strcmp(argv[i], "--scene") == 0 && i + 1 < argc) {
@@ -327,6 +344,10 @@ int main(int argc, char** argv) {
       print_usage(argv[0]);
       return EXIT_FAILURE;
     }
+  }
+  if (audio_live && audio_file) {
+    std::fprintf(stderr, "choose one of --audio / --mic / --audio-device and --audio-file\n");
+    return EXIT_FAILURE;
   }
   if (capture && !frames) {
     std::fprintf(stderr, "--capture requires --frames\n");
@@ -413,6 +434,24 @@ int main(int argc, char** argv) {
   std::printf("CUDA device : %s (sm_%d%d, %d SMs)\n", prop.name, prop.major,
               prop.minor, prop.multiProcessorCount);
 
+  // Audio is opened after cudaSetDevice so its FFT lands on the same GPU.
+  AudioInput* audio = nullptr;
+  if (audio_live || audio_file) {
+    char error[256];
+    audio = audio_file ? audio_open_file(audio_file, error, sizeof error)
+                       : audio_open_live(audio_device, error, sizeof error);
+    if (!audio) {
+      std::fprintf(stderr, "%s\n", error);
+      return EXIT_FAILURE;
+    }
+  }
+  AudioLevels sound;   // stays all-zero without audio: the v1 look, untouched
+  // The fields' own clock. It runs at the audio-driven speed, while
+  // g.simulation_time stays on the wall clock (the audio and autopilot need it).
+  double field_time = 0.0;
+  float ripple_age = 1e3f, ripple_amp = 0.0f, previous_hit = 0.0f;
+  float2 ripple_center = make_float2(0, 0);
+
   // ---------------------------------------------------------------------------
   //  3. OpenGL owns the memory. Two VBOs: positions and colours.
   //     The simulation's velocity array, on the other hand, is never drawn, so
@@ -484,6 +523,12 @@ int main(int argc, char** argv) {
   const GLint u_inv_aspect = glGetUniformLocation(point_program, "uInvAspect");
   const GLint u_point_size = glGetUniformLocation(point_program, "uPointSize");
   const GLint u_intensity = glGetUniformLocation(point_program, "uIntensity");
+  const GLint u_zoom = glGetUniformLocation(point_program, "uZoom");
+  const GLint u_ripple_center = glGetUniformLocation(point_program, "uRippleCenter");
+  const GLint u_ripple_age = glGetUniformLocation(point_program, "uRippleAge");
+  const GLint u_ripple_amp = glGetUniformLocation(point_program, "uRippleAmp");
+  const GLint u_warp = glGetUniformLocation(point_program, "uWarp");
+  const GLint u_time = glGetUniformLocation(point_program, "uTime");
   const GLint u_fade = glGetUniformLocation(fade_program, "uFade");
 
   glEnable(GL_BLEND);
@@ -556,6 +601,23 @@ int main(int argc, char** argv) {
     previous_mouse = mouse;
     const float attraction = g.repel ? -12.0f : (g.attract ? 12.0f : (g.demo ? 1.5f : 0.8f));
     const bool advance = !g.paused || g.reset || resized;
+    if (audio && !g.paused) sound = audio_levels(audio, g.simulation_time, dt);
+
+    // --- music -> speed and shape --------------------------------------------
+    // Speed: a kick briefly runs the simulation up to 3x faster. Particles keep
+    // following the same flow lines, just further per frame, so motion surges
+    // with the beat without bending the scene out of shape.
+    const float speed = 1.0f + 2.0f * sound.bass_hit + 0.15f * sound.mid;
+    // A strong kick launches a shock ring from the cursor (see the shader).
+    if (!g.paused) {
+      if (sound.bass_hit > 0.35f && previous_hit <= 0.35f) {
+        ripple_age = 0.0f;
+        ripple_amp = sound.bass_hit;
+        ripple_center = mouse;
+      }
+      ripple_age += dt;
+      previous_hit = sound.bass_hit;
+    }
 
     // --- run the simulation, straight into OpenGL's buffers ------------------
     if (advance) {
@@ -587,20 +649,37 @@ int main(int argc, char** argv) {
         params.mouse = mouse;
         params.bounds = bounds;
         params.mouse_velocity = mouse_velocity;
-        const int steps = std::max(1, static_cast<int>(std::ceil(dt * 120.0f)));
-        params.dt = dt / steps;
-        params.time = time;
-        params.attraction = attraction;
-        params.swirl = 0.85f;
+        const float sim_dt = dt * speed;
+        const int steps = std::max(1, static_cast<int>(std::ceil(sim_dt * 120.0f)));
+        params.dt = sim_dt / steps;
+        field_time += sim_dt;
+        const float field_now = static_cast<float>(field_time);
+        params.time = field_now;
         params.damping = 0.12f;
-        params.jitter = 0.15f;
+
+        // --- music -> motion. Every term is zero without audio. ----------------
+        // Levels (sound.bass) stay high while the music is busy; hits
+        // (sound.bass_hit) spike on each kick and drop to zero between them.
+        // Anything that changes *motion* adds up frame after frame, so levels
+        // only get small, steady jobs, and the big effects ride on hits:
+        //   kick : a push from the cursor; the surge, ring, zoom and flash are
+        //          outside this block
+        //   snare: a quick colour shift
+        //   mids : the vortex spins harder and the scene's flow speeds up
+        //   highs: agitation, and random particles flash
+        params.attraction = attraction - 3.0f * sound.bass_hit;
         params.radius = 0.30f;
+        params.hue_shift = 0.12f * sound.mid_hit;
+        params.swirl = 0.85f + 0.8f * sound.mid;
+        params.flow_boost = 0.25f * sound.mid;
+        params.jitter = 0.15f + 0.8f * sound.high;
+        params.sparkle = std::min(1.0f, 0.4f * sound.high + sound.high_hit);
         params.count = count;
         params.scene = g.scene;
         params.palette = g.palette;
 
         for (int step = 0; step < steps; ++step) {
-          params.time = time - dt + params.dt * (step + 1);
+          params.time = field_now - sim_dt + params.dt * (step + 1);
           particles_update(d_pos, d_velocity, d_col, params, 0);
         }
       }
@@ -632,15 +711,26 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
-      glUniform1f(u_point_size,
-                  g.point_size * (static_cast<float>(g.framebuffer_h) / 720.0f));
+      glUniform1f(u_zoom, 1.0f + 0.06f * sound.bass_hit);    // the kick's "punch"
+      glUniform2f(u_ripple_center, ripple_center.x, ripple_center.y);
+      glUniform1f(u_ripple_age, ripple_age);
+      glUniform1f(u_ripple_amp, ripple_amp);
+      glUniform1f(u_warp, 0.2f * sound.mid + sound.mid_hit);  // 0 without audio
+      glUniform1f(u_time, time);
+      // The bass also "breathes" the whole image: bigger, brighter points.
+      glUniform1f(u_point_size, g.point_size * (1.0f + 0.1f * sound.bass + 0.25f * sound.bass_hit) *
+                  (static_cast<float>(g.framebuffer_h) / 720.0f));
       glUniform1f(u_intensity, std::pow(200000.0f / count, 0.7f) *
-                  (g.paused ? 1.0f : dt * 60.0f));
+                  (1.0f + 0.2f * sound.bass) * (g.paused ? 1.0f : dt * 60.0f));
       glBindVertexArray(vao_points);
       glDrawArrays(GL_POINTS, 0, count);
     }
-    renderer.draw(vao_empty, g.exposure, g.bloom);
-    if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged);
+    // The light pulse happens here, *after* the trails: anything added to the
+    // trail buffer gets averaged over half a second and loses its punch.
+    renderer.draw(vao_empty, g.exposure * (1.0f + 0.1f * sound.bass + 0.25f * sound.bass_hit),
+                  g.bloom, 1.0f + 0.4f * sound.bass_hit);
+    if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged,
+                       audio ? &sound : nullptr);
     const GLenum gl_error = glGetError();
     if (gl_error != GL_NO_ERROR) {
       std::fprintf(stderr, "OpenGL error: 0x%x\n", gl_error);
@@ -700,6 +790,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaFree(staged_col));
   }
   CUDA_CHECK(cudaFree(d_velocity));
+  audio_close(audio);
 
   glDeleteProgram(point_program);
   glDeleteProgram(fade_program);

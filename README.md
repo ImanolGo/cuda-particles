@@ -23,6 +23,10 @@ persistent HDR trails, soft bloom, and no engine or UI framework.
    examples/05  timing & streams        →  events, overlap, pinned memory
    examples/06  CUDA ↔ OpenGL interop   →  the bridge to the final project
    particles/                           →  the final project
+
+   part 2 — the particles listen
+   examples/07  audio FFT               →  cuFFT, windowing, frequency bands
+   examples/08  audio input             →  live capture, hop size, envelopes, auto-gain
 ```
 
 ## Quick start
@@ -42,6 +46,8 @@ make run-03_index_math
 make run-04_shared_memory
 make run-05_timing_streams
 make run-06_interop                    # a window, a CUDA-animated triangle
+make run-07_audio_fft                  # part 2: bass / mid / high from an FFT
+make run-08_audio_input                # live meter of whatever is playing (needs libpulse)
 
 # 4. the final project
 make run-particles
@@ -87,6 +93,57 @@ advects five coloured bands through an undulating field with wraparound edges.
 **Ink** uses the curl of a stream function to create rolling eddies. All three
 react to cursor position **and cursor velocity**. The fields are intentionally
 art-directed, not an N-body gravity or fluid solver.
+
+### Part 2: make it listen
+
+Three 24-second recordings, each an autopilot tour through all three scenes
+driven by a real track (sound on):
+[Ouroboros](docs/audio/particle-atlas-ouroboros.mp4) ·
+[Voxel Revolution](docs/audio/particle-atlas-voxel-revolution.mp4) ·
+[Raving Energy](docs/audio/particle-atlas-raving-energy.mp4).
+Full-quality versions are attached to the
+[v2.0 release](https://github.com/ImanolGo/cuda-particles/releases/tag/v2.0).
+
+> Music by Kevin MacLeod ([incompetech.com](https://incompetech.com)):
+> "Ouroboros", "Voxel Revolution" and "Raving Energy", licensed under
+> [Creative Commons: By Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+```bash
+make listen                                        # react to whatever is playing
+make listen ARGS="--mic"                           # or to the microphone
+make run-particles ARGS="--audio-file track.wav"   # or to a WAV, frame-exact
+```
+
+Lessons 07 and 08 become `particles/src/audio.cu`: a capture thread reads the
+sound card every 10.7 ms, runs the FFT on its own non-blocking CUDA stream, and
+publishes three smoothed levels. The render loop reads them and feeds them into
+the same knobs you already know:
+
+| signal | drives |
+|---|---|
+| kick (bass hit) | a speed surge (up to 3x), a shock ring from the cursor, a zoom punch, an exposure and bloom flash, bigger points |
+| snare (mid hit) | a wave distortion over the whole image and a quick colour shift |
+| mid level | stronger swirl and a faster scene flow |
+| high level / hit | extra jitter, and random particles flash |
+
+*Levels* say how loud a band is and stay high while the music is busy; *hits*
+spike on each attack and drop to zero between them. The mapping is a handful of
+lines next to the other constants in `particles/src/main.cu`, and it encodes
+two lessons learned the hard way. Anything that changes *motion* accumulates:
+faster flow winds the galaxy into a ring, and a physical shockwave per kick
+hollows it out within seconds. And anything added to the trail buffer is
+averaged over half a second, so a light pulse there barely shows. The big
+effects therefore avoid pushing particles. The speed surge advances the
+simulation clock faster, so particles travel further along the *same* flow
+lines. The shock ring, distortion and zoom are applied in the vertex shader,
+and the flash in the final tone-mapping pass. All of them hit hard and leave
+the simulation's shape untouched. Without audio every term is zero and the scenes look
+exactly as in part 1.
+
+Live capture uses PulseAudio's simple API (PipeWire speaks it too) and is built
+only when `libpulse` is installed; `--audio-file` needs nothing extra. To record
+a video with sound: `python3 scripts/record_demo.py --runner prime-run --audio-file track.wav`
+writes `docs/demo-audio.mp4`.
 
 ### How it works
 

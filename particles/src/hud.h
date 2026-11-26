@@ -71,16 +71,28 @@ void main() { fragColor = vCol; }
           if (bits[row * 5 + col] == '1') rect(x + col * scale, y + row * scale, scale, scale, r, g, b);
     }
   }
-  void draw(int w, int h, const char* scene, int count, bool demo, bool paused, bool staged) {
+  void draw(int w, int h, const char* scene, int count, bool demo, bool paused, bool staged,
+            const AudioLevels* audio = nullptr) {
     vertices.clear();
     const float scale = static_cast<float>(h) / 720.0f;
     rect(24 * scale, 24 * scale, 3 * scale, 64 * scale, 0.2f, 0.85f, 1);
     text(40 * scale, 26 * scale, "CUDA / PARTICLE ATLAS", 2 * scale, 0.65f, 0.78f, 0.87f);
     text(40 * scale, 52 * scale, scene, 4 * scale, 0.9f, 0.96f, 1);
     char status[160];
-    std::snprintf(status, sizeof status, "%d PARTICLES / %s / %s", count,
-                  staged ? "CUDA + COPY" : "ZERO COPY", paused ? "PAUSED" : (demo ? "AUTOPILOT" : "LIVE"));
+    std::snprintf(status, sizeof status, "%d PARTICLES / %s / %s%s", count,
+                  staged ? "CUDA + COPY" : "ZERO COPY", paused ? "PAUSED" : (demo ? "AUTOPILOT" : "LIVE"),
+                  audio ? " / AUDIO" : "");
     text(40 * scale, 94 * scale, status, 1.5f * scale, 0.38f, 0.6f, 0.72f);
+    if (audio) {  // three thin meters: what the particles are hearing
+      const char* names[3] = {"BASS", "MID", "HIGH"};
+      const float levels[3] = {audio->bass, audio->mid, audio->high};
+      for (int i = 0; i < 3; ++i) {
+        const float y = (112 + 12 * i) * scale;
+        text(40 * scale, y, names[i], 1.25f * scale, 0.38f, 0.6f, 0.72f);
+        rect(76 * scale, y + 2 * scale, 120 * scale, 5 * scale, 0.2f, 0.3f, 0.36f, 0.5f);
+        rect(76 * scale, y + 2 * scale, 120 * scale * levels[i], 5 * scale, 0.35f, 0.85f, 1.0f, 0.9f);
+      }
+    }
     text(28 * scale, h - 32 * scale, "1 ORBIT   2 AURORA   3 INK    A AUTO    C COLOUR    B BLOOM    H HUD", 1.5f * scale, 0.43f, 0.62f, 0.72f);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glUseProgram(program);
