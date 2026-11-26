@@ -5,7 +5,7 @@
 #  Everyday commands
 #  -----------------
 #     make                  build every example + the particle system
-#     make 01_hello         build one example  (01_hello .. 06_interop)
+#     make 01_hello         build one example  (01_hello .. 07_audio_fft)
 #     make run-01_hello     build & run it
 #     make particles        build the final project
 #     make run-particles    build & run the final project
@@ -34,7 +34,7 @@ NVCCFLAGS += -allow-unsupported-compiler
 endif
 
 EXAMPLES  := 01_hello 02_vector_add 03_index_math 04_shared_memory \
-             05_timing_streams 06_interop
+             05_timing_streams 06_interop 07_audio_fft
 
 PARTICLE_SRC := $(wildcard particles/src/*.cu)
 PARTICLE_HDR := $(wildcard particles/src/*.cuh) $(wildcard particles/src/*.h)
@@ -51,7 +51,10 @@ all: $(addprefix $(BUILD)/,$(EXAMPLES)) $(BUILD)/particles
 # -----------------------------------------------------------------------------
 $(BUILD)/%: examples/%/main.cu common/cuda_check.h | $(BUILD)
 	@echo "  NVCC  $<"
-	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -o $@ $< $(GL_LIBS)
+	@$(NVCC) $(NVCCFLAGS) $(GL_CFLAGS) -Icommon -o $@ $< $(GL_LIBS) $(EXTRA_LIBS)
+
+# Lessons that need an extra CUDA library say so here.
+$(BUILD)/07_audio_fft: EXTRA_LIBS := -lcufft
 
 # Convenience aliases so `make 01_hello` works as well as `make run-01_hello`.
 $(EXAMPLES): %: $(BUILD)/%

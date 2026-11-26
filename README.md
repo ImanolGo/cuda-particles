@@ -23,6 +23,9 @@ persistent HDR trails, soft bloom, and no engine or UI framework.
    examples/05  timing & streams        →  events, overlap, pinned memory
    examples/06  CUDA ↔ OpenGL interop   →  the bridge to the final project
    particles/                           →  the final project
+
+   part 2 — the particles listen  (work in progress)
+   examples/07  audio FFT               →  cuFFT, windowing, frequency bands
 ```
 
 ## Quick start
@@ -42,6 +45,7 @@ make run-03_index_math
 make run-04_shared_memory
 make run-05_timing_streams
 make run-06_interop                    # a window, a CUDA-animated triangle
+make run-07_audio_fft                  # part 2: bass / mid / high from an FFT
 
 # 4. the final project
 make run-particles
