@@ -94,6 +94,35 @@ advects five coloured bands through an undulating field with wraparound edges.
 react to cursor position **and cursor velocity**. The fields are intentionally
 art-directed, not an N-body gravity or fluid solver.
 
+### Part 2: make it listen
+
+```bash
+make listen                                        # react to whatever is playing
+make listen ARGS="--mic"                           # or to the microphone
+make run-particles ARGS="--audio-file track.wav"   # or to a WAV, frame-exact
+```
+
+Lessons 07 and 08 become `particles/src/audio.cu`: a capture thread reads the
+sound card every 10.7 ms, runs the FFT on its own non-blocking CUDA stream, and
+publishes three smoothed levels. The render loop reads them and feeds them into
+the same knobs you already know:
+
+| band | drives |
+|---|---|
+| bass | an outward push from the cursor on every kick, plus a pulse in point size and brightness |
+| mid | stronger swirl and a faster scene flow |
+| high | extra jitter, and random particles flash |
+
+The mapping is six lines next to the other constants in `particles/src/main.cu`.
+Keep the forces small: anything that changes *motion* accumulates (faster flow
+winds the galaxy into a ring within seconds), while the light pulse is instant.
+Without audio every term is zero and the scenes look exactly as in part 1.
+
+Live capture uses PulseAudio's simple API (PipeWire speaks it too) and is built
+only when `libpulse` is installed; `--audio-file` needs nothing extra. To record
+a video with sound: `python3 scripts/record_demo.py --runner prime-run --audio-file track.wav`
+writes `docs/demo-audio.mp4`.
+
 ### How it works
 
 The default interop path keeps particle data on the GPU throughout each frame:

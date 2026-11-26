@@ -14,6 +14,8 @@ int main() {
     CUDA_CHECK(cudaMalloc(&pos, bytes));
     CUDA_CHECK(cudaMalloc(&vel, bytes));
     CUDA_CHECK(cudaMalloc(&col, static_cast<size_t>(n + 1) * sizeof(uchar4)));
+    // loud = 1 drives every audio-controlled parameter at full volume.
+    for (int loud = 0; loud < 2; ++loud)
     for (int scene = 0; scene < 3; ++scene) {
       CUDA_CHECK(cudaMemset(pos, 0, bytes));
       CUDA_CHECK(cudaMemset(vel, 0, bytes));
@@ -28,11 +30,15 @@ int main() {
       p.radius = 0.3f;
       p.count = n;
       p.scene = p.palette = scene;
+      if (loud) {
+        p.radius = 0.55f; p.swirl = 2.45f; p.jitter = 4.15f;
+        p.flow_boost = 0.9f; p.sparkle = 1.0f;
+      }
       particles_init(pos, vel, col, n, 1, p.bounds, scene, 0);
       for (int step = 0; step < 240; ++step) {
         p.time = step * p.dt;
         p.mouse = make_float2(0.6f * std::cos(p.time), 0.4f * std::sin(p.time));
-        p.attraction = step < 120 ? 12.0f : -12.0f;
+        p.attraction = (step < 120 ? 12.0f : -12.0f) - (loud && step % 30 < 4 ? 9.0f : 0.0f);
         particles_update(pos, vel, col, p, 0);
       }
       std::vector<float4> positions(n + 1), velocities(n + 1);
@@ -56,6 +62,6 @@ int main() {
     }
     CUDA_CHECK(cudaFree(pos)); CUDA_CHECK(cudaFree(vel)); CUDA_CHECK(cudaFree(col));
   }
-  std::printf("physics: finite, bounded, speed-limited, tail guards intact: %s\n", correct ? "yes" : "NO");
+  std::printf("physics: finite, bounded, speed-limited, tail guards intact (quiet + loud): %s\n", correct ? "yes" : "NO");
   return correct ? EXIT_SUCCESS : EXIT_FAILURE;
 }

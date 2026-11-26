@@ -19,6 +19,7 @@
 //    06 interop            cudaGraphicsMap / Unmap, shared VBOs
 //
 //  New here: analytic flow fields, persistent HDR trails, and bloom/tone mapping.
+//  Part 2 (--audio): lessons 07 and 08 feed bass / mid / high into the forces.
 //  --staged is an explicit, slower copy-based path for non-NVIDIA GL contexts.
 //
 //  Controls
@@ -54,6 +55,7 @@
 #include <cuda_runtime.h>
 
 #include "cuda_check.h"
+#include "audio.h"
 #include "particles.cuh"
 #include "shaders.h"
 
@@ -245,6 +247,8 @@ void print_usage(const char* program) {
       "  --frames N  exit after N fixed 1/60-second frames\n"
       "  --capture DIR  write PPM frames to DIR (requires --frames)\n"
       "  --no-hud    hide the overlay\n"
+      "  --audio     react to what is playing (or --mic, --audio-device NAME)\n"
+      "  --audio-file F  react to a WAV, in step with the simulation clock\n"
       "\n"
       "controls:\n"
       "  mouse       the cloud follows and swirls around the cursor\n"
@@ -270,6 +274,9 @@ int main(int argc, char** argv) {
   int width = 1280, height = 720, frames = 0;
   bool staged = false;
   const char* capture = nullptr;
+  bool audio_live = false;
+  const char* audio_device = "@DEFAULT_MONITOR@";
+  const char* audio_file = nullptr;
 
   // Reject malformed values rather than silently turning typos into zero.
   auto number = [&](int& i, double low, double high, bool integer = false) {
@@ -309,6 +316,16 @@ int main(int argc, char** argv) {
       g.demo = true;
     } else if (std::strcmp(argv[i], "--no-hud") == 0) {
       g.hud = false;
+    } else if (std::strcmp(argv[i], "--audio") == 0) {
+      audio_live = true;
+    } else if (std::strcmp(argv[i], "--mic") == 0) {
+      audio_live = true;
+      audio_device = nullptr;  // nullptr = default input
+    } else if (std::strcmp(argv[i], "--audio-device") == 0 && i + 1 < argc) {
+      audio_live = true;
+      audio_device = argv[++i];
+    } else if (std::strcmp(argv[i], "--audio-file") == 0 && i + 1 < argc) {
+      audio_file = argv[++i];
     } else if (std::strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
       capture = argv[++i];
     } else if (std::strcmp(argv[i], "--scene") == 0 && i + 1 < argc) {
@@ -327,6 +344,10 @@ int main(int argc, char** argv) {
       print_usage(argv[0]);
       return EXIT_FAILURE;
     }
+  }
+  if (audio_live && audio_file) {
+    std::fprintf(stderr, "choose one of --audio / --mic / --audio-device and --audio-file\n");
+    return EXIT_FAILURE;
   }
   if (capture && !frames) {
     std::fprintf(stderr, "--capture requires --frames\n");
@@ -412,6 +433,19 @@ int main(int argc, char** argv) {
   CUDA_CHECK(cudaGetDeviceProperties(&prop, devices[0]));
   std::printf("CUDA device : %s (sm_%d%d, %d SMs)\n", prop.name, prop.major,
               prop.minor, prop.multiProcessorCount);
+
+  // Audio is opened after cudaSetDevice so its FFT lands on the same GPU.
+  AudioInput* audio = nullptr;
+  if (audio_live || audio_file) {
+    char error[256];
+    audio = audio_file ? audio_open_file(audio_file, error, sizeof error)
+                       : audio_open_live(audio_device, error, sizeof error);
+    if (!audio) {
+      std::fprintf(stderr, "%s\n", error);
+      return EXIT_FAILURE;
+    }
+  }
+  AudioLevels sound;   // stays all-zero without audio: the v1 look, untouched
 
   // ---------------------------------------------------------------------------
   //  3. OpenGL owns the memory. Two VBOs: positions and colours.
@@ -556,6 +590,7 @@ int main(int argc, char** argv) {
     previous_mouse = mouse;
     const float attraction = g.repel ? -12.0f : (g.attract ? 12.0f : (g.demo ? 1.5f : 0.8f));
     const bool advance = !g.paused || g.reset || resized;
+    if (audio && !g.paused) sound = audio_levels(audio, g.simulation_time, dt);
 
     // --- run the simulation, straight into OpenGL's buffers ------------------
     if (advance) {
@@ -590,11 +625,21 @@ int main(int argc, char** argv) {
         const int steps = std::max(1, static_cast<int>(std::ceil(dt * 120.0f)));
         params.dt = dt / steps;
         params.time = time;
-        params.attraction = attraction;
-        params.swirl = 0.85f;
         params.damping = 0.12f;
-        params.jitter = 0.15f;
-        params.radius = 0.30f;
+
+        // --- music -> motion. Every term is zero without audio. ----------------
+        //   bass: each kick pushes the cloud outward and widens the cursor's reach
+        //   mid : the vortex spins harder and the scene's flow speeds up
+        //   high: more agitation, and random particles flash
+        // Keep the forces small. Anything that changes *motion* adds up frame
+        // after frame (faster flow winds the galaxy arms into a ring within
+        // seconds); the light pulse below is instant and never accumulates.
+        params.attraction = attraction - 4.0f * sound.bass;
+        params.radius = 0.30f + 0.10f * sound.bass;
+        params.swirl = 0.85f + 0.8f * sound.mid;
+        params.flow_boost = 0.25f * sound.mid;
+        params.jitter = 0.15f + 0.8f * sound.high;
+        params.sparkle = sound.high;
         params.count = count;
         params.scene = g.scene;
         params.palette = g.palette;
@@ -632,15 +677,17 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
-      glUniform1f(u_point_size,
-                  g.point_size * (static_cast<float>(g.framebuffer_h) / 720.0f));
+      // The bass also "breathes" the whole image: bigger, brighter points.
+      glUniform1f(u_point_size, g.point_size * (1.0f + 0.35f * sound.bass) *
+                  (static_cast<float>(g.framebuffer_h) / 720.0f));
       glUniform1f(u_intensity, std::pow(200000.0f / count, 0.7f) *
-                  (g.paused ? 1.0f : dt * 60.0f));
+                  (1.0f + 0.45f * sound.bass) * (g.paused ? 1.0f : dt * 60.0f));
       glBindVertexArray(vao_points);
       glDrawArrays(GL_POINTS, 0, count);
     }
     renderer.draw(vao_empty, g.exposure, g.bloom);
-    if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged);
+    if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged,
+                       audio ? &sound : nullptr);
     const GLenum gl_error = glGetError();
     if (gl_error != GL_NO_ERROR) {
       std::fprintf(stderr, "OpenGL error: 0x%x\n", gl_error);
@@ -700,6 +747,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaFree(staged_col));
   }
   CUDA_CHECK(cudaFree(d_velocity));
+  audio_close(audio);
 
   glDeleteProgram(point_program);
   glDeleteProgram(fade_program);

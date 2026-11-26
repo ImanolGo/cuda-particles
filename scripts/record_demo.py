@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--seconds", type=int, default=24, choices=range(1, 121), metavar="1..120")
     parser.add_argument("--count", type=int, default=200000)
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("docs"))
+    parser.add_argument("--audio-file", type=pathlib.Path,
+                        help="WAV that drives the particles; writes demo-audio.mp4 with the sound")
     args = parser.parse_args()
     if not shutil.which("ffmpeg"):
         parser.error("ffmpeg is required")
@@ -35,7 +37,22 @@ def main():
         ]
         if args.staged:
             command.append("--staged")
+        if args.audio_file:
+            command += ["--audio-file", str(args.audio_file)]
         subprocess.run(command, check=True)
+        if args.audio_file:
+            # The particles heard the track on the simulation clock, so frame N
+            # lines up with second N/30 of the audio: no montage, no re-timing.
+            video = args.output / "demo-audio.mp4"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+                            "-framerate", "30", "-i", str(frames / "frame-%05d.ppm"),
+                            "-i", str(args.audio_file), "-t", str(args.seconds),
+                            "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+                            str(video)], check=True)
+            print(f"Recorded {args.seconds}s with audio: {video} "
+                  f"({video.stat().st_size / 1048576:.2f} MiB)")
+            return
         inputs = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
                   "-framerate", "30", "-i", str(frames / "frame-%05d.ppm")]
         palette = pathlib.Path(tmp) / "palette.png"

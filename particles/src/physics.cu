@@ -145,6 +145,8 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
     flow = make_float2(0.42f * __sinf(P.x * 3.0f + p.time * 0.2f) * __cosf(P.y * 3.0f),
                      -0.42f * __cosf(P.x * 3.0f + p.time * 0.2f) * __sinf(P.y * 3.0f));
   }
+  flow.x *= 1.0f + p.flow_boost;
+  flow.y *= 1.0f + p.flow_boost;
   const float follow = 1.0f - __expf(-2.0f * p.dt);
   V.x += (flow.x - V.x) * follow;
   V.y += (flow.y - V.y) * follow;
@@ -226,7 +228,10 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   const float hue = atan2f(V.y, V.x) * kInvTau + 0.5f;
   float3 c = palette(p.scene == 0 ? V.z * 0.9f + V.w * 0.12f : hue * 0.5f + P.x * 0.15f,
                      p.palette);
-  const float bright = fminf(1.0f, 0.40f + speed * 0.35f);
+  // Sparkle: a few random particles flash at full brightness each step. The
+  // random stream `s` was seeded for the jitter above; one more draw is free.
+  const float flash = rnd01(s) < p.sparkle * 0.08f ? 1.0f : 0.0f;
+  const float bright = fmaxf(fminf(1.0f, 0.40f + speed * 0.35f), flash);
   c.x *= bright;
   c.y *= bright;
   c.z *= bright;
@@ -237,7 +242,7 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   pos[i] = P;
   vel[i] = V;
   col[i] = make_uchar4(to_byte(c.x), to_byte(c.y), to_byte(c.z),
-                      to_byte(0.08f + P.w * 0.12f));
+                      to_byte(0.08f + P.w * 0.12f + flash * 0.6f));
 }
 
 }  // namespace
