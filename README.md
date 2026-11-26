@@ -109,8 +109,8 @@ the same knobs you already know:
 
 | signal | drives |
 |---|---|
-| kick (bass hit) | a zoom punch, an exposure and bloom flash, bigger points, a push from the cursor |
-| snare (mid hit) | a quick colour shift |
+| kick (bass hit) | a speed surge (up to 3x), a shock ring from the cursor, a zoom punch, an exposure and bloom flash, bigger points |
+| snare (mid hit) | a wave distortion over the whole image and a quick colour shift |
 | mid level | stronger swirl and a faster scene flow |
 | high level / hit | extra jitter, and random particles flash |
 
@@ -121,9 +121,11 @@ two lessons learned the hard way. Anything that changes *motion* accumulates:
 faster flow winds the galaxy into a ring, and a physical shockwave per kick
 hollows it out within seconds. And anything added to the trail buffer is
 averaged over half a second, so a light pulse there barely shows. The big
-effects therefore happen at draw time: the zoom is applied in the vertex shader
-and the flash in the final tone-mapping pass, so they hit hard and leave the
-simulation untouched. Without audio every term is zero and the scenes look
+effects therefore avoid pushing particles. The speed surge advances the
+simulation clock faster, so particles travel further along the *same* flow
+lines. The shock ring, distortion and zoom are applied in the vertex shader,
+and the flash in the final tone-mapping pass. All of them hit hard and leave
+the simulation's shape untouched. Without audio every term is zero and the scenes look
 exactly as in part 1.
 
 Live capture uses PulseAudio's simple API (PipeWire speaks it too) and is built

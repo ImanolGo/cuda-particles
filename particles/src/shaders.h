@@ -20,14 +20,33 @@ layout(location = 1) in vec4 aCol;    // rgba, 0..1
 uniform float uInvAspect;             // height / width
 uniform float uPointSize;             // base size in pixels
 uniform float uZoom;                  // 1 = still; >1 punches the image outward
+uniform vec2  uRippleCenter;          // where the last kick's shock ring started
+uniform float uRippleAge;             // seconds since that kick
+uniform float uRippleAmp;             // 0 = no ring
+uniform float uWarp;                  // 0 = straight; >0 bends the image
+uniform float uTime;
 
 out vec4 vCol;
 
 void main() {
-    // The zoom only moves where points are *drawn*, never where they are
-    // simulated, so a kick can shove the whole image without the scene
-    // drifting. The trails remember the jump as short radial streaks.
-    gl_Position  = vec4(aPos.x * uInvAspect * uZoom, aPos.y * uZoom, 0.0, 1.0);
+    // Everything below moves where points are *drawn*, never where they are
+    // simulated, so the music can shove the image as hard as it likes without
+    // the scene drifting away. The trails remember each shove as a streak.
+    vec2 p = aPos.xy;
+
+    // Shock ring: a band, about 0.1 units wide, racing outward at 1.6 units/s
+    // and pushing whatever it passes away from its centre.
+    vec2  d     = p - uRippleCenter;
+    float r     = length(d) + 1e-4;
+    float front = r - 1.6 * uRippleAge;
+    float ring  = exp(-front * front * 90.0) * exp(-2.5 * uRippleAge);
+    p += d / r * (0.10 * uRippleAmp * ring);
+
+    // Warp: two slow, crossing waves bend the whole picture like heat haze.
+    p += uWarp * 0.04 * vec2(sin(p.y * 6.0 + uTime * 2.3), sin(p.x * 5.0 - uTime * 1.9));
+
+    p *= uZoom;
+    gl_Position  = vec4(p.x * uInvAspect, p.y, 0.0, 1.0);
     gl_PointSize = uPointSize * (1.0 + aPos.z);
     vCol = aCol;
 }

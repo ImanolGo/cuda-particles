@@ -446,6 +446,11 @@ int main(int argc, char** argv) {
     }
   }
   AudioLevels sound;   // stays all-zero without audio: the v1 look, untouched
+  // The fields' own clock. It runs at the audio-driven speed, while
+  // g.simulation_time stays on the wall clock (the audio and autopilot need it).
+  double field_time = 0.0;
+  float ripple_age = 1e3f, ripple_amp = 0.0f, previous_hit = 0.0f;
+  float2 ripple_center = make_float2(0, 0);
 
   // ---------------------------------------------------------------------------
   //  3. OpenGL owns the memory. Two VBOs: positions and colours.
@@ -519,6 +524,11 @@ int main(int argc, char** argv) {
   const GLint u_point_size = glGetUniformLocation(point_program, "uPointSize");
   const GLint u_intensity = glGetUniformLocation(point_program, "uIntensity");
   const GLint u_zoom = glGetUniformLocation(point_program, "uZoom");
+  const GLint u_ripple_center = glGetUniformLocation(point_program, "uRippleCenter");
+  const GLint u_ripple_age = glGetUniformLocation(point_program, "uRippleAge");
+  const GLint u_ripple_amp = glGetUniformLocation(point_program, "uRippleAmp");
+  const GLint u_warp = glGetUniformLocation(point_program, "uWarp");
+  const GLint u_time = glGetUniformLocation(point_program, "uTime");
   const GLint u_fade = glGetUniformLocation(fade_program, "uFade");
 
   glEnable(GL_BLEND);
@@ -593,6 +603,22 @@ int main(int argc, char** argv) {
     const bool advance = !g.paused || g.reset || resized;
     if (audio && !g.paused) sound = audio_levels(audio, g.simulation_time, dt);
 
+    // --- music -> speed and shape --------------------------------------------
+    // Speed: a kick briefly runs the simulation up to 3x faster. Particles keep
+    // following the same flow lines, just further per frame, so motion surges
+    // with the beat without bending the scene out of shape.
+    const float speed = 1.0f + 2.0f * sound.bass_hit + 0.15f * sound.mid;
+    // A strong kick launches a shock ring from the cursor (see the shader).
+    if (!g.paused) {
+      if (sound.bass_hit > 0.45f && previous_hit <= 0.45f) {
+        ripple_age = 0.0f;
+        ripple_amp = sound.bass_hit;
+        ripple_center = mouse;
+      }
+      ripple_age += dt;
+      previous_hit = sound.bass_hit;
+    }
+
     // --- run the simulation, straight into OpenGL's buffers ------------------
     if (advance) {
       if (!staged) CUDA_CHECK(cudaGraphicsMapResources(2, resources, 0));
@@ -623,9 +649,12 @@ int main(int argc, char** argv) {
         params.mouse = mouse;
         params.bounds = bounds;
         params.mouse_velocity = mouse_velocity;
-        const int steps = std::max(1, static_cast<int>(std::ceil(dt * 120.0f)));
-        params.dt = dt / steps;
-        params.time = time;
+        const float sim_dt = dt * speed;
+        const int steps = std::max(1, static_cast<int>(std::ceil(sim_dt * 120.0f)));
+        params.dt = sim_dt / steps;
+        field_time += sim_dt;
+        const float field_now = static_cast<float>(field_time);
+        params.time = field_now;
         params.damping = 0.12f;
 
         // --- music -> motion. Every term is zero without audio. ----------------
@@ -633,7 +662,8 @@ int main(int argc, char** argv) {
         // (sound.bass_hit) spike on each kick and drop to zero between them.
         // Anything that changes *motion* adds up frame after frame, so levels
         // only get small, steady jobs, and the big effects ride on hits:
-        //   kick : a push from the cursor, plus the zoom and light pulse below
+        //   kick : a push from the cursor; the surge, ring, zoom and flash are
+        //          outside this block
         //   snare: a quick colour shift
         //   mids : the vortex spins harder and the scene's flow speeds up
         //   highs: agitation, and random particles flash
@@ -649,7 +679,7 @@ int main(int argc, char** argv) {
         params.palette = g.palette;
 
         for (int step = 0; step < steps; ++step) {
-          params.time = time - dt + params.dt * (step + 1);
+          params.time = field_now - sim_dt + params.dt * (step + 1);
           particles_update(d_pos, d_velocity, d_col, params, 0);
         }
       }
@@ -681,7 +711,12 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
-      glUniform1f(u_zoom, 1.0f + 0.045f * sound.bass_hit);   // the kick's "punch"
+      glUniform1f(u_zoom, 1.0f + 0.03f * sound.bass_hit);    // the kick's "punch"
+      glUniform2f(u_ripple_center, ripple_center.x, ripple_center.y);
+      glUniform1f(u_ripple_age, ripple_age);
+      glUniform1f(u_ripple_amp, ripple_amp);
+      glUniform1f(u_warp, 0.2f * sound.mid + sound.mid_hit);  // 0 without audio
+      glUniform1f(u_time, time);
       // The bass also "breathes" the whole image: bigger, brighter points.
       glUniform1f(u_point_size, g.point_size * (1.0f + 0.2f * sound.bass + 0.5f * sound.bass_hit) *
                   (static_cast<float>(g.framebuffer_h) / 720.0f));
@@ -692,8 +727,8 @@ int main(int argc, char** argv) {
     }
     // The light pulse happens here, *after* the trails: anything added to the
     // trail buffer gets averaged over half a second and loses its punch.
-    renderer.draw(vao_empty, g.exposure * (1.0f + 0.25f * sound.bass + 1.1f * sound.bass_hit),
-                  g.bloom, 1.0f + 1.8f * sound.bass_hit);
+    renderer.draw(vao_empty, g.exposure * (1.0f + 0.2f * sound.bass + 0.7f * sound.bass_hit),
+                  g.bloom, 1.0f + 1.2f * sound.bass_hit);
     if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged,
                        audio ? &sound : nullptr);
     const GLenum gl_error = glGetError();
