@@ -24,7 +24,7 @@ persistent HDR trails, soft bloom, and no engine or UI framework.
    examples/06  CUDA ↔ OpenGL interop   →  the bridge to the final project
    particles/                           →  the final project
 
-   part 2 — the particles listen  (work in progress)
+   part 2 — the particles listen
    examples/07  audio FFT               →  cuFFT, windowing, frequency bands
    examples/08  audio input             →  live capture, hop size, envelopes, auto-gain
 ```
@@ -95,6 +95,18 @@ react to cursor position **and cursor velocity**. The fields are intentionally
 art-directed, not an N-body gravity or fluid solver.
 
 ### Part 2: make it listen
+
+Three 24-second recordings, each an autopilot tour through all three scenes
+driven by a real track (sound on):
+[Ouroboros](docs/audio/particle-atlas-ouroboros.mp4) ·
+[Voxel Revolution](docs/audio/particle-atlas-voxel-revolution.mp4) ·
+[Raving Energy](docs/audio/particle-atlas-raving-energy.mp4).
+Full-quality versions are attached to the
+[v2.0 release](https://github.com/ImanolGo/cuda-particles/releases/tag/v2.0).
+
+> Music by Kevin MacLeod ([incompetech.com](https://incompetech.com)):
+> "Ouroboros", "Voxel Revolution" and "Raving Energy", licensed under
+> [Creative Commons: By Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ```bash
 make listen                                        # react to whatever is playing
