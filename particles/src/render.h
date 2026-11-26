@@ -55,7 +55,7 @@ struct Renderer {
     bloom[0].resize(w / 4 > 0 ? w / 4 : 1, h / 4 > 0 ? h / 4 : 1);
     bloom[1].resize(bloom[0].width, bloom[0].height);
   }
-  void draw(GLuint empty_vao, float exposure, bool glow) const {
+  void draw(GLuint empty_vao, float exposure, bool glow, float glow_gain = 1.0f) const {
     glDisable(GL_BLEND);
     glBindVertexArray(empty_vao);
     glActiveTexture(GL_TEXTURE0);
@@ -77,7 +77,7 @@ struct Renderer {
     glUniform1i(glGetUniformLocation(present, "uBloom"), 1);
     glUniform2f(glGetUniformLocation(present, "uResolution"), trails.width, trails.height);
     glUniform1f(glGetUniformLocation(present, "uExposure"), exposure);
-    glUniform1f(glGetUniformLocation(present, "uGlow"), glow ? 0.85f : 0.0f);
+    glUniform1f(glGetUniformLocation(present, "uGlow"), glow ? 0.85f * glow_gain : 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glActiveTexture(GL_TEXTURE0);
     glEnable(GL_BLEND);

@@ -226,11 +226,11 @@ __global__ void update_kernel(float4* __restrict__ pos, float4* __restrict__ vel
   // ---------------------------------------------------------------------------
   const float speed = sqrtf(V.x * V.x + V.y * V.y);
   const float hue = atan2f(V.y, V.x) * kInvTau + 0.5f;
-  float3 c = palette(p.scene == 0 ? V.z * 0.9f + V.w * 0.12f : hue * 0.5f + P.x * 0.15f,
-                     p.palette);
+  float3 c = palette((p.scene == 0 ? V.z * 0.9f + V.w * 0.12f : hue * 0.5f + P.x * 0.15f) +
+                     p.hue_shift, p.palette);
   // Sparkle: a few random particles flash at full brightness each step. The
   // random stream `s` was seeded for the jitter above; one more draw is free.
-  const float flash = rnd01(s) < p.sparkle * 0.08f ? 1.0f : 0.0f;
+  const float flash = rnd01(s) < p.sparkle * 0.15f ? 1.0f : 0.0f;
   const float bright = fmaxf(fminf(1.0f, 0.40f + speed * 0.35f), flash);
   c.x *= bright;
   c.y *= bright;

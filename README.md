@@ -107,16 +107,24 @@ sound card every 10.7 ms, runs the FFT on its own non-blocking CUDA stream, and
 publishes three smoothed levels. The render loop reads them and feeds them into
 the same knobs you already know:
 
-| band | drives |
+| signal | drives |
 |---|---|
-| bass | an outward push from the cursor on every kick, plus a pulse in point size and brightness |
-| mid | stronger swirl and a faster scene flow |
-| high | extra jitter, and random particles flash |
+| kick (bass hit) | a zoom punch, an exposure and bloom flash, bigger points, a push from the cursor |
+| snare (mid hit) | a quick colour shift |
+| mid level | stronger swirl and a faster scene flow |
+| high level / hit | extra jitter, and random particles flash |
 
-The mapping is six lines next to the other constants in `particles/src/main.cu`.
-Keep the forces small: anything that changes *motion* accumulates (faster flow
-winds the galaxy into a ring within seconds), while the light pulse is instant.
-Without audio every term is zero and the scenes look exactly as in part 1.
+*Levels* say how loud a band is and stay high while the music is busy; *hits*
+spike on each attack and drop to zero between them. The mapping is a handful of
+lines next to the other constants in `particles/src/main.cu`, and it encodes
+two lessons learned the hard way. Anything that changes *motion* accumulates:
+faster flow winds the galaxy into a ring, and a physical shockwave per kick
+hollows it out within seconds. And anything added to the trail buffer is
+averaged over half a second, so a light pulse there barely shows. The big
+effects therefore happen at draw time: the zoom is applied in the vertex shader
+and the flash in the final tone-mapping pass, so they hit hard and leave the
+simulation untouched. Without audio every term is zero and the scenes look
+exactly as in part 1.
 
 Live capture uses PulseAudio's simple API (PipeWire speaks it too) and is built
 only when `libpulse` is installed; `--audio-file` needs nothing extra. To record

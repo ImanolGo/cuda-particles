@@ -19,11 +19,15 @@ layout(location = 1) in vec4 aCol;    // rgba, 0..1
 
 uniform float uInvAspect;             // height / width
 uniform float uPointSize;             // base size in pixels
+uniform float uZoom;                  // 1 = still; >1 punches the image outward
 
 out vec4 vCol;
 
 void main() {
-    gl_Position  = vec4(aPos.x * uInvAspect, aPos.y, 0.0, 1.0);
+    // The zoom only moves where points are *drawn*, never where they are
+    // simulated, so a kick can shove the whole image without the scene
+    // drifting. The trails remember the jump as short radial streaks.
+    gl_Position  = vec4(aPos.x * uInvAspect * uZoom, aPos.y * uZoom, 0.0, 1.0);
     gl_PointSize = uPointSize * (1.0 + aPos.z);
     vCol = aCol;
 }

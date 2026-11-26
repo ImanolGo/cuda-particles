@@ -52,6 +52,8 @@ constexpr float ATTACK_S = 0.010f;
 constexpr float RELEASE_S = 0.180f;
 constexpr float PEAK_HOLD = 4.0f;
 constexpr float NOISE_GATE = 0.002f;
+constexpr float AVERAGE_S = 0.30f;  // "recent average" that a hit must beat
+constexpr float HIT_GAIN = 3.0f;    // how far above it counts as a full hit
 
 #define CUFFT_CHECK(call)                                                      \
   do {                                                                         \
@@ -150,16 +152,25 @@ struct Analyzer {
 struct Shaper {
   float env[BANDS] = {};
   float peak[BANDS] = {};
+  float average[BANDS] = {};
 
   AudioLevels step(const float raw[BANDS], float dt) {
-    float v[BANDS];
+    float v[BANDS], hit[BANDS];
     for (int b = 0; b < BANDS; ++b) {
       const float tau = raw[b] > env[b] ? ATTACK_S : RELEASE_S;
-      if (dt > 0) env[b] += (raw[b] - env[b]) * (1.0f - std::exp(-dt / tau));
+      if (dt > 0) {
+        env[b] += (raw[b] - env[b]) * (1.0f - std::exp(-dt / tau));
+        average[b] += (env[b] - average[b]) * (1.0f - std::exp(-dt / AVERAGE_S));
+      }
       peak[b] = std::fmax(env[b], peak[b] * std::exp(-dt / PEAK_HOLD));
-      v[b] = peak[b] < NOISE_GATE ? 0.0f : env[b] / peak[b];
+      const bool quiet = peak[b] < NOISE_GATE;
+      v[b] = quiet ? 0.0f : env[b] / peak[b];
+      // The envelope rises in 10 ms but the average needs ~300 ms to follow,
+      // so the gap between them is large only just after an attack.
+      hit[b] = quiet ? 0.0f
+                     : std::clamp((env[b] - average[b]) / peak[b] * HIT_GAIN, 0.0f, 1.0f);
     }
-    return {v[0], v[1], v[2]};
+    return {v[0], v[1], v[2], hit[0], hit[1], hit[2]};
   }
 };
 

@@ -17,9 +17,17 @@
 #include <cstddef>
 
 struct AudioLevels {
+  // Levels: how loud each band is right now, 0..1 after auto-gain. Smooth, and
+  // high for as long as the music is busy.
   float bass = 0.0f;
   float mid = 0.0f;
   float high = 0.0f;
+  // Hits: how far each band just jumped above its recent average, 0..1. They
+  // spike on a kick or a snare and fall back to zero between them, so they can
+  // drive big effects without the scene drifting away.
+  float bass_hit = 0.0f;
+  float mid_hit = 0.0f;
+  float high_hit = 0.0f;
 };
 
 struct AudioInput;  // opaque: callers never see the threads or CUDA buffers

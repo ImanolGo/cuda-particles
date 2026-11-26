@@ -518,6 +518,7 @@ int main(int argc, char** argv) {
   const GLint u_inv_aspect = glGetUniformLocation(point_program, "uInvAspect");
   const GLint u_point_size = glGetUniformLocation(point_program, "uPointSize");
   const GLint u_intensity = glGetUniformLocation(point_program, "uIntensity");
+  const GLint u_zoom = glGetUniformLocation(point_program, "uZoom");
   const GLint u_fade = glGetUniformLocation(fade_program, "uFade");
 
   glEnable(GL_BLEND);
@@ -628,18 +629,21 @@ int main(int argc, char** argv) {
         params.damping = 0.12f;
 
         // --- music -> motion. Every term is zero without audio. ----------------
-        //   bass: each kick pushes the cloud outward and widens the cursor's reach
-        //   mid : the vortex spins harder and the scene's flow speeds up
-        //   high: more agitation, and random particles flash
-        // Keep the forces small. Anything that changes *motion* adds up frame
-        // after frame (faster flow winds the galaxy arms into a ring within
-        // seconds); the light pulse below is instant and never accumulates.
-        params.attraction = attraction - 4.0f * sound.bass;
-        params.radius = 0.30f + 0.10f * sound.bass;
+        // Levels (sound.bass) stay high while the music is busy; hits
+        // (sound.bass_hit) spike on each kick and drop to zero between them.
+        // Anything that changes *motion* adds up frame after frame, so levels
+        // only get small, steady jobs, and the big effects ride on hits:
+        //   kick : a push from the cursor, plus the zoom and light pulse below
+        //   snare: a quick colour shift
+        //   mids : the vortex spins harder and the scene's flow speeds up
+        //   highs: agitation, and random particles flash
+        params.attraction = attraction - 3.0f * sound.bass_hit;
+        params.radius = 0.30f;
+        params.hue_shift = 0.12f * sound.mid_hit;
         params.swirl = 0.85f + 0.8f * sound.mid;
         params.flow_boost = 0.25f * sound.mid;
         params.jitter = 0.15f + 0.8f * sound.high;
-        params.sparkle = sound.high;
+        params.sparkle = std::min(1.0f, 0.4f * sound.high + sound.high_hit);
         params.count = count;
         params.scene = g.scene;
         params.palette = g.palette;
@@ -677,15 +681,19 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
+      glUniform1f(u_zoom, 1.0f + 0.045f * sound.bass_hit);   // the kick's "punch"
       // The bass also "breathes" the whole image: bigger, brighter points.
-      glUniform1f(u_point_size, g.point_size * (1.0f + 0.35f * sound.bass) *
+      glUniform1f(u_point_size, g.point_size * (1.0f + 0.2f * sound.bass + 0.5f * sound.bass_hit) *
                   (static_cast<float>(g.framebuffer_h) / 720.0f));
       glUniform1f(u_intensity, std::pow(200000.0f / count, 0.7f) *
                   (1.0f + 0.45f * sound.bass) * (g.paused ? 1.0f : dt * 60.0f));
       glBindVertexArray(vao_points);
       glDrawArrays(GL_POINTS, 0, count);
     }
-    renderer.draw(vao_empty, g.exposure, g.bloom);
+    // The light pulse happens here, *after* the trails: anything added to the
+    // trail buffer gets averaged over half a second and loses its punch.
+    renderer.draw(vao_empty, g.exposure * (1.0f + 0.25f * sound.bass + 1.1f * sound.bass_hit),
+                  g.bloom, 1.0f + 1.8f * sound.bass_hit);
     if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged,
                        audio ? &sound : nullptr);
     const GLenum gl_error = glGetError();

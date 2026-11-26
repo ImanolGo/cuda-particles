@@ -32,7 +32,7 @@ int main() {
       p.scene = p.palette = scene;
       if (loud) {
         p.radius = 0.55f; p.swirl = 2.45f; p.jitter = 4.15f;
-        p.flow_boost = 0.9f; p.sparkle = 1.0f;
+        p.flow_boost = 0.9f; p.sparkle = 1.0f; p.hue_shift = 0.12f;
       }
       particles_init(pos, vel, col, n, 1, p.bounds, scene, 0);
       for (int step = 0; step < 240; ++step) {
