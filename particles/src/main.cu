@@ -610,7 +610,7 @@ int main(int argc, char** argv) {
     const float speed = 1.0f + 2.0f * sound.bass_hit + 0.15f * sound.mid;
     // A strong kick launches a shock ring from the cursor (see the shader).
     if (!g.paused) {
-      if (sound.bass_hit > 0.45f && previous_hit <= 0.45f) {
+      if (sound.bass_hit > 0.35f && previous_hit <= 0.35f) {
         ripple_age = 0.0f;
         ripple_amp = sound.bass_hit;
         ripple_center = mouse;
@@ -711,24 +711,24 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
-      glUniform1f(u_zoom, 1.0f + 0.03f * sound.bass_hit);    // the kick's "punch"
+      glUniform1f(u_zoom, 1.0f + 0.05f * sound.bass_hit);    // the kick's "punch"
       glUniform2f(u_ripple_center, ripple_center.x, ripple_center.y);
       glUniform1f(u_ripple_age, ripple_age);
       glUniform1f(u_ripple_amp, ripple_amp);
       glUniform1f(u_warp, 0.2f * sound.mid + sound.mid_hit);  // 0 without audio
       glUniform1f(u_time, time);
       // The bass also "breathes" the whole image: bigger, brighter points.
-      glUniform1f(u_point_size, g.point_size * (1.0f + 0.2f * sound.bass + 0.5f * sound.bass_hit) *
+      glUniform1f(u_point_size, g.point_size * (1.0f + 0.1f * sound.bass + 0.25f * sound.bass_hit) *
                   (static_cast<float>(g.framebuffer_h) / 720.0f));
       glUniform1f(u_intensity, std::pow(200000.0f / count, 0.7f) *
-                  (1.0f + 0.45f * sound.bass) * (g.paused ? 1.0f : dt * 60.0f));
+                  (1.0f + 0.2f * sound.bass) * (g.paused ? 1.0f : dt * 60.0f));
       glBindVertexArray(vao_points);
       glDrawArrays(GL_POINTS, 0, count);
     }
     // The light pulse happens here, *after* the trails: anything added to the
     // trail buffer gets averaged over half a second and loses its punch.
-    renderer.draw(vao_empty, g.exposure * (1.0f + 0.2f * sound.bass + 0.7f * sound.bass_hit),
-                  g.bloom, 1.0f + 1.2f * sound.bass_hit);
+    renderer.draw(vao_empty, g.exposure * (1.0f + 0.1f * sound.bass + 0.25f * sound.bass_hit),
+                  g.bloom, 1.0f + 0.4f * sound.bass_hit);
     if (g.hud) hud.draw(g.framebuffer_w, g.framebuffer_h, scene_names[g.scene], count, g.demo, g.paused, staged,
                        audio ? &sound : nullptr);
     const GLenum gl_error = glGetError();

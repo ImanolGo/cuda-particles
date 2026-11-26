@@ -34,16 +34,16 @@ void main() {
     // the scene drifting away. The trails remember each shove as a streak.
     vec2 p = aPos.xy;
 
-    // Shock ring: a band, about 0.1 units wide, racing outward at 1.6 units/s
+    // Shock ring: a band, about 0.15 units wide, racing outward at 1.6 units/s
     // and pushing whatever it passes away from its centre.
     vec2  d     = p - uRippleCenter;
     float r     = length(d) + 1e-4;
     float front = r - 1.6 * uRippleAge;
-    float ring  = exp(-front * front * 90.0) * exp(-2.5 * uRippleAge);
-    p += d / r * (0.10 * uRippleAmp * ring);
+    float ring  = exp(-front * front * 45.0) * exp(-1.8 * uRippleAge);
+    p += d / r * (0.22 * uRippleAmp * ring);
 
     // Warp: two slow, crossing waves bend the whole picture like heat haze.
-    p += uWarp * 0.04 * vec2(sin(p.y * 6.0 + uTime * 2.3), sin(p.x * 5.0 - uTime * 1.9));
+    p += uWarp * 0.065 * vec2(sin(p.y * 6.0 + uTime * 2.3), sin(p.x * 5.0 - uTime * 1.9));
 
     p *= uZoom;
     gl_Position  = vec4(p.x * uInvAspect, p.y, 0.0, 1.0);
