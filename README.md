@@ -98,7 +98,7 @@ art-directed, not an N-body gravity or fluid solver.
 
 [Watch the recording](docs/audio/particle-atlas-ouroboros.mp4) (sound on): a
 24-second autopilot tour through all three scenes, driven by a real track.
-Full-quality versions, including two more tracks, are attached to the
+A full-quality version is attached to the
 [v2.0 release](https://github.com/ImanolGo/cuda-particles/releases/tag/v2.0).
 
 > Music: "Ouroboros" by Kevin MacLeod ([incompetech.com](https://incompetech.com)),
