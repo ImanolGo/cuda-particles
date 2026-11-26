@@ -711,7 +711,7 @@ int main(int argc, char** argv) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glUseProgram(point_program);
       glUniform1f(u_inv_aspect, 1.0f / aspect);
-      glUniform1f(u_zoom, 1.0f + 0.05f * sound.bass_hit);    // the kick's "punch"
+      glUniform1f(u_zoom, 1.0f + 0.06f * sound.bass_hit);    // the kick's "punch"
       glUniform2f(u_ripple_center, ripple_center.x, ripple_center.y);
       glUniform1f(u_ripple_age, ripple_age);
       glUniform1f(u_ripple_amp, ripple_amp);
