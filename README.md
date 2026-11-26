@@ -96,17 +96,13 @@ art-directed, not an N-body gravity or fluid solver.
 
 ### Part 2: make it listen
 
-Three 24-second recordings, each an autopilot tour through all three scenes
-driven by a real track (sound on):
-[Ouroboros](docs/audio/particle-atlas-ouroboros.mp4) ·
-[Voxel Revolution](docs/audio/particle-atlas-voxel-revolution.mp4) ·
-[Raving Energy](docs/audio/particle-atlas-raving-energy.mp4).
-Full-quality versions are attached to the
+[Watch the recording](docs/audio/particle-atlas-ouroboros.mp4) (sound on): a
+24-second autopilot tour through all three scenes, driven by a real track.
+Full-quality versions, including two more tracks, are attached to the
 [v2.0 release](https://github.com/ImanolGo/cuda-particles/releases/tag/v2.0).
 
-> Music by Kevin MacLeod ([incompetech.com](https://incompetech.com)):
-> "Ouroboros", "Voxel Revolution" and "Raving Energy", licensed under
-> [Creative Commons: By Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+> Music: "Ouroboros" by Kevin MacLeod ([incompetech.com](https://incompetech.com)),
+> licensed under [Creative Commons: By Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ```bash
 make listen                                        # react to whatever is playing
