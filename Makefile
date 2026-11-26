@@ -5,7 +5,7 @@
 #  Everyday commands
 #  -----------------
 #     make                  build every example + the particle system
-#     make 01_hello         build one example  (01_hello .. 07_audio_fft)
+#     make 01_hello         build one example  (01_hello .. 08_audio_input)
 #     make run-01_hello     build & run it
 #     make particles        build the final project
 #     make run-particles    build & run the final project
@@ -36,6 +36,16 @@ endif
 EXAMPLES  := 01_hello 02_vector_add 03_index_math 04_shared_memory \
              05_timing_streams 06_interop 07_audio_fft
 
+# Lesson 08 records live audio through PulseAudio/PipeWire (`libpulse`). It is
+# part of the default build only when that library is installed, so the rest of
+# the course never depends on it. `make run-08_audio_input` always tries.
+AUDIO_LIBS := $(patsubst -pthread,-Xcompiler -pthread,$(shell pkg-config --libs libpulse-simple 2>/dev/null))
+ifneq ($(AUDIO_LIBS),)
+EXAMPLES  += 08_audio_input
+endif
+# Lessons that need a window or live input cannot run unattended.
+INTERACTIVE := 06_interop 08_audio_input
+
 PARTICLE_SRC := $(wildcard particles/src/*.cu)
 PARTICLE_HDR := $(wildcard particles/src/*.cuh) $(wildcard particles/src/*.h)
 
@@ -55,6 +65,7 @@ $(BUILD)/%: examples/%/main.cu common/cuda_check.h | $(BUILD)
 
 # Lessons that need an extra CUDA library say so here.
 $(BUILD)/07_audio_fft: EXTRA_LIBS := -lcufft
+$(BUILD)/08_audio_input: EXTRA_LIBS = -lcufft $(or $(AUDIO_LIBS),-lpulse-simple -lpulse)
 
 # Convenience aliases so `make 01_hello` works as well as `make run-01_hello`.
 $(EXAMPLES): %: $(BUILD)/%
@@ -85,8 +96,8 @@ run-%: $(BUILD)/%
 $(BUILD)/test_physics: tests/physics.cu particles/src/physics.cu particles/src/particles.cuh common/cuda_check.h | $(BUILD)
 	@$(NVCC) $(NVCCFLAGS) -Icommon -Iparticles/src -o $@ tests/physics.cu particles/src/physics.cu
 
-check: $(addprefix $(BUILD)/,$(filter-out 06_interop,$(EXAMPLES))) $(BUILD)/test_physics
-	@set -e; for example in $(filter-out 06_interop,$(EXAMPLES)); do ./$(BUILD)/$$example; done
+check: $(addprefix $(BUILD)/,$(filter-out $(INTERACTIVE),$(EXAMPLES))) $(BUILD)/test_physics
+	@set -e; for example in $(filter-out $(INTERACTIVE),$(EXAMPLES)); do ./$(BUILD)/$$example; done
 	@./$(BUILD)/test_physics
 
 demo: $(BUILD)/particles

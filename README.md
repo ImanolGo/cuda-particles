@@ -26,6 +26,7 @@ persistent HDR trails, soft bloom, and no engine or UI framework.
 
    part 2 — the particles listen  (work in progress)
    examples/07  audio FFT               →  cuFFT, windowing, frequency bands
+   examples/08  audio input             →  live capture, hop size, envelopes, auto-gain
 ```
 
 ## Quick start
@@ -46,6 +47,7 @@ make run-04_shared_memory
 make run-05_timing_streams
 make run-06_interop                    # a window, a CUDA-animated triangle
 make run-07_audio_fft                  # part 2: bass / mid / high from an FFT
+make run-08_audio_input                # live meter of whatever is playing (needs libpulse)
 
 # 4. the final project
 make run-particles
